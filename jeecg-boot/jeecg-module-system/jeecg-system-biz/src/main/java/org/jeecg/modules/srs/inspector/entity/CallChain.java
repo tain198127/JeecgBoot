@@ -1,0 +1,51 @@
+package org.jeecg.modules.srs.inspector.entity;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.experimental.Accessors;
+
+import java.io.Serializable;
+import java.util.Date;
+
+/**
+ * 调用链实体
+ * @author jeecg-boot
+ * @version V1.0
+ * @since 2025-01-01
+ */
+@Data
+@EqualsAndHashCode(callSuper = false)
+@Accessors(chain = true)
+@TableName("srs_call_chain")
+public class CallChain implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    /** 主键 */
+    @TableId(type = IdType.ASSIGN_ID)
+    private String id;
+    /** 接口ID */
+    private String endpointId;
+    /** 调用层级 */
+    private Integer level;
+    /** 调用类型：0-Controller，1-Service，2-Mapper，3-Other */
+    private Integer callType;
+    /** 类名 */
+    private String className;
+    /** 方法名 */
+    private String methodName;
+    /** 描述 */
+    private String description;
+    /** 创建人 */
+    private String createBy;
+    /** 创建时间 */
+    private Date createTime;
+    /** 更新人 */
+    private String updateBy;
+    /** 更新时间 */
+    private Date updateTime;
+    /** 备注 */
+    private String remark;
+}

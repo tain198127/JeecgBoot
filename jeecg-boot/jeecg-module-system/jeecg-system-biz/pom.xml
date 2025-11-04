@@ -73,6 +73,17 @@
 			<artifactId>jeecg-boot-module-airag</artifactId>
 			<version>${jeecgboot.version}</version>
 		</dependency>
+		<!-- JavaParser for code analysis -->
+		<dependency>
+			<groupId>com.github.javaparser</groupId>
+			<artifactId>javaparser-core</artifactId>
+			<version>3.25.8</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.javaparser</groupId>
+			<artifactId>javaparser-symbol-solver-core</artifactId>
+			<version>3.25.8</version>
+		</dependency>
 	</dependencies>
 	
 </project>
