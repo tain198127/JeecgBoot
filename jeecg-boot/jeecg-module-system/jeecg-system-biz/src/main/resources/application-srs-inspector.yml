@@ -1,0 +1,29 @@
+# SRS Inspector Configuration
+spring:
+  datasource:
+    dynamic:
+      datasource:
+        srs_inspector:
+          url: jdbc:mysql://localhost:3306/jeecg-boot?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
+          username: root
+          password: password
+          driver-class-name: com.mysql.cj.jdbc.Driver
+
+# SRS Inspector Settings
+srs:
+  inspector:
+    # 扫描路径
+    scan-paths:
+      - /Users/baodan/develop/git/trae_demo/JeecgBoot/jeecg-boot/jeecg-module-system/jeecg-system-biz/src/main/java
+    # 并发度
+    concurrency: 5
+    # 排除的目录
+    exclude-dirs:
+      - test
+    # 模型配置
+    model:
+      base-url: http://localhost:8080/api/v1/chat/completions
+      model-name: gpt-3.5-turbo
+      timeout: 30000
+      retry-times: 3
+      api-key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
