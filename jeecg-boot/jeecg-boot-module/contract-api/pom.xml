@@ -9,19 +9,12 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>jeecg-boot-module</artifactId>
+    <artifactId>contract-api</artifactId>
     <packaging>pom</packaging>
 
     <modules>
-        <module>jeecg-module-demo</module>
-        <module>jeecg-boot-module-airag</module>
-        <module>contract-domain</module>
-        <module>contract-app</module>
-        <module>contract-infra</module>
-        <module>contract-api</module>
-        <module>contract-ocr-nlp</module>
-        <module>contract-approval</module>
+        <module>contract-cloud-api</module>
+        <module>contract-local-api</module>
     </modules>
-
 
 </project>
