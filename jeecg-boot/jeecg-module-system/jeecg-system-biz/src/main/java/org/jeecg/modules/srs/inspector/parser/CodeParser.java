@@ -5,11 +5,16 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+import com.github.javaparser.ast.visitor.GenericVisitorAdapter;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedTypeDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
-import com.github.javaparser.symbolsolver.model.resolution.TypeSolver;
+import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
@@ -202,5 +207,45 @@ public class CodeParser {
      */
     public boolean hasOperationAnnotation(MethodDeclaration method) {
         return hasAnnotation(method, "Operation");
+    }
+
+    /**
+     * 获取方法体中的所有方法调用
+     * @param method 方法声明
+     * @return 方法调用列表
+     */
+    public List<MethodCallExpr> getMethodCalls(MethodDeclaration method) {
+        List<MethodCallExpr> methodCalls = new ArrayList<>();
+        
+        if (method.getBody().isPresent()) {
+            BlockStmt body = method.getBody().get();
+            body.accept(new VoidVisitorAdapter<Void>() {
+                @Override
+                public void visit(MethodCallExpr n, Void arg) {
+                    methodCalls.add(n);
+                    super.visit(n, arg);
+                }
+            }, null);
+        }
+        
+        return methodCalls;
+    }
+
+    /**
+     * 检查类是否是Service
+     * @param cls 类声明
+     * @return 是否是Service
+     */
+    public boolean isService(ClassOrInterfaceDeclaration cls) {
+        return hasAnnotation(cls, "Service");
+    }
+
+    /**
+     * 检查类是否是Mapper
+     * @param cls 类声明
+     * @return 是否是Mapper
+     */
+    public boolean isMapper(ClassOrInterfaceDeclaration cls) {
+        return hasAnnotation(cls, "Mapper") || hasAnnotation(cls, "Repository");
     }
 }

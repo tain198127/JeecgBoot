@@ -153,6 +153,21 @@ public class SrsInspectorController {
     }
 
     /**
+     * 生成API文档
+     * @param endpointId 接口ID
+     * @return 生成的文档
+     */
+    @GetMapping("/generateDoc")
+    public Result<String> generateDoc(@RequestParam String endpointId) {
+        try {
+            String doc = callChainService.generateDocumentation(endpointId);
+            return Result.OK(doc);
+        } catch (Exception e) {
+            return Result.error("生成文档失败：" + e.getMessage());
+        }
+    }
+
+    /**
      * 导出SRS
      * @param taskId 任务ID
      * @return 导出结果

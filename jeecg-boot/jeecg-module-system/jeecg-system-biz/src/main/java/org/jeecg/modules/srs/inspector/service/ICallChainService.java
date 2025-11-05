@@ -18,4 +18,11 @@ public interface ICallChainService extends IService<CallChain> {
      * @return 调用链列表
      */
     List<CallChain> getCallChainByEndpointId(String endpointId);
+
+    /**
+     * 生成API文档
+     * @param endpointId 接口ID
+     * @return 生成的文档
+     */
+    String generateDocumentation(String endpointId);
 }
