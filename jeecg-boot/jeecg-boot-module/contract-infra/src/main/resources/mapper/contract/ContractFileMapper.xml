@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.jeecg.modules.contract.infra.mapper.ContractFileMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="org.jeecg.modules.contract.domain.ContractFile">
+        <id column="id" property="id" />
+        <result column="contract_id" property="contractId" />
+        <result column="file_type" property="fileType" />
+        <result column="object_key" property="objectKey" />
+        <result column="hash" property="hash" />
+        <result column="page_count" property="pageCount" />
+        <result column="mime_type" property="mimeType" />
+        <result column="convert_status" property="convertStatus" />
+        <result column="preview_url" property="previewUrl" />
+        <result column="tenant_id" property="tenantId" />
+        <result column="created_by" property="createdBy" />
+        <result column="created_time" property="createdTime" />
+        <result column="updated_by" property="updatedBy" />
+        <result column="updated_time" property="updatedTime" />
+        <result column="op_trace_id" property="opTraceId" />
+        <result column="revision" property="revision" />
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        id, contract_id, file_type, object_key, hash, page_count, mime_type, convert_status, preview_url, tenant_id, created_by, created_time, updated_by, updated_time, op_trace_id, revision
+    </sql>
+
+</mapper>
