@@ -98,7 +98,7 @@ class CallChainAnalyzerTest {
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);
         Endpoint endpoint1 = new Endpoint();
-        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.bondAdmin.BondSubjectModifyController");
+        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.pricingplacing.PreGeneratePlacingResultController");
         endpoint1.setMethodName("doService");
         endpoint1.setId("test");
         // Build the call chains for the endpoint

@@ -48,4 +48,8 @@ public class CallChain implements Serializable {
     private Date updateTime;
     /** 备注 */
     private String remark;
+    /**
+     * 调用链中如果是mapper的话，对应的sql内容
+     */
+    private String sqlContent;
 }
