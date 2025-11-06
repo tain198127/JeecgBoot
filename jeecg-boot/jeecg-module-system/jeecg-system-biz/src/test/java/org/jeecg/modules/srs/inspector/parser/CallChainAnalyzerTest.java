@@ -97,6 +97,7 @@ class CallChainAnalyzerTest {
 
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);
+        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module/nc-issuance-book-dcm-service/src/main/resources/mybatis/mapper");
         Endpoint endpoint1 = new Endpoint();
         endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.pricingplacing.PreGeneratePlacingResultController");
         endpoint1.setMethodName("doService");
