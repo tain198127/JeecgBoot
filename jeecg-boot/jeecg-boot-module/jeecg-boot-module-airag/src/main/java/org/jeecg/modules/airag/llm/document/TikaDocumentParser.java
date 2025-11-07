@@ -148,15 +148,40 @@ public class TikaDocumentParser {
      * @throws IOException
      * @author chenrui
      * @date 2025/3/5 14:42
-     * @deprecated 因为jeecg主项目目前不支持poi5.x, 自己实现提取功能.
      */
-    @Deprecated
     private static Document extractTextFromDocx(InputStream inputStream) throws IOException {
         try (XWPFDocument document = new XWPFDocument(inputStream)) {
             StringBuilder text = new StringBuilder();
+            
+            // 提取章节结构
             for (XWPFParagraph para : document.getParagraphs()) {
-                text.append(para.getText()).append("\n");
+                String style = para.getStyle();
+                if (style != null && style.startsWith("Heading")) {
+                    // 章节标题
+                    int level = Integer.parseInt(style.substring(7));
+                    text.append("#".repeat(level)).append(" ").append(para.getText()).append("\n\n");
+                } else {
+                    // 正文段落
+                    text.append(para.getText()).append("\n");
+                }
             }
+            
+            // 提取表格内容
+            for (XWPFTable table : document.getTables()) {
+                for (XWPFTableRow row : table.getRows()) {
+                    for (XWPFTableCell cell : row.getTableCells()) {
+                        text.append(cell.getText()).append("\t");
+                    }
+                    text.append("\n");
+                }
+                text.append("\n");
+            }
+            
+            // 提取脚注内容
+            for (XWPFFootnote footnote : document.getFootnotes()) {
+                text.append("[脚注]").append(footnote.getText()).append("\n");
+            }
+            
             return Document.from(text.toString());
         }
     }
