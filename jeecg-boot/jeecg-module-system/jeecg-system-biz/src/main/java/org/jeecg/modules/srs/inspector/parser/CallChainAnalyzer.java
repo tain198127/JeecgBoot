@@ -65,12 +65,16 @@ public class CallChainAnalyzer {
     private CodeParser codeParser;
     private Map<String, ClassOrInterfaceDeclaration> classMap;
     private Map<String, MethodDeclaration> methodMap;
+    private Map<String, Integer> classComplexMap;
+    private Map<String,Integer> methodComplexMap;
 
     @Autowired
     public CallChainAnalyzer(CodeParser codeParser) {
         this.codeParser = codeParser;
         this.classMap = new HashMap<>();
         this.methodMap = new HashMap<>();
+        this.classComplexMap = new HashMap();
+        this.methodComplexMap = new HashMap<>();
     }
 
     /**
@@ -81,18 +85,24 @@ public class CallChainAnalyzer {
     public void init(List<File> javaFiles) throws IOException {
         for (File file : javaFiles) {
             CompilationUnit cu = codeParser.parseFile(file);
-            
+
+            int complexLevel= CyclomaticComplexityCalculator.calculateComplexity(cu);
+
             // 遍历所有类和接口
             cu.accept(new VoidVisitorAdapter<Void>() {
                 @Override
                 public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
+
                         String className = cls.getFullyQualifiedName().orElse("");
                         classMap.put(className, cls);
-                        
+                        classComplexMap.put(className,complexLevel);
                         // 遍历所有方法
                         for (MethodDeclaration method : cls.getMethods()) {
                             String methodKey = className + "." + method.getNameAsString();
                             methodMap.put(methodKey, method);
+                            int methodComplexLevel = MethodComplexityAnalyzer.calculateMethodComplexity(method);
+                            methodComplexMap.put(methodKey,methodComplexLevel);
+
                         }
 
                     super.visit(cls, arg);
