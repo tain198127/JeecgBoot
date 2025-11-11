@@ -1,5 +1,7 @@
 package org.jeecg.modules.srs.inspector.parser;
 
+import cn.hutool.core.bean.copier.BeanCopier;
+import cn.hutool.core.bean.BeanUtil;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -43,7 +45,7 @@ import org.apache.ibatis.mapping.MappedStatement;
 @Slf4j
 @Component
 public class CallChainAnalyzer {
-
+    
     // 解析 XML 文件
     Configuration mybatisConfiguration = new Configuration() {
         @Override
@@ -203,14 +205,21 @@ public class CallChainAnalyzer {
                 callerChain.setMethodName(callerMethodName);
                 callerChain.setDescription(isCallerMapper ? "Mapper方法" : "Service方法");
                 chain.getCallChainList().add(callerChain);
-                flatCallChain.add(callerChain);
+                
+                // 深度拷贝 CallChain 对象后再添加到 flatCallChain
+                CallChain flatCallChainItem = deepCopyCallChain(callerChain);
+                flatCallChain.add(flatCallChainItem);
                 
                 // 递归调用，但如果是Mapper就不再继续递归
                 if (!isCallerMapper) {
                     List<CallChain> subCallChains = buildCallChainRecycle(callerChain,flatCallChain);
                     if(subCallChains != null && !subCallChains.isEmpty()) {
                         callerChain.getCallChainList().addAll(subCallChains);
-                        flatCallChain.addAll(subCallChains);
+                        // 深度拷贝子调用链后再添加到 flatCallChain
+                        List<CallChain> flatSubCallChains = subCallChains.stream()
+                                .map(this::deepCopyCallChain)
+                                .collect(Collectors.toList());
+                        flatCallChain.addAll(flatSubCallChains);
                     }
                 }
             }
@@ -235,7 +244,8 @@ public class CallChainAnalyzer {
         controllerChain.setMethodName(endpoint.getMethodName());
         controllerChain.setDescription("Controller方法");
         callChains.add(controllerChain);
-        flatCallChain.add(controllerChain);
+        CallChain flatcontrollerChain = deepCopyCallChain(controllerChain);
+        flatCallChain.add(flatcontrollerChain);
         
         // 查找Controller方法调用的Service方法
         String controllerMethodKey = endpoint.getControllerName() + "." + endpoint.getMethodName();
@@ -267,11 +277,13 @@ public class CallChainAnalyzer {
                             serviceChain.setMethodName(methodName);
                             serviceChain.setDescription("Service方法");
                             controllerChain.getCallChainList().add(serviceChain);
-                            flatCallChain.add(serviceChain);
+                            // 深度拷贝 CallChain 对象后再添加到 flatCallChain
+                            CallChain flatServiceChain = deepCopyCallChain(serviceChain);
+                            flatCallChain.add(flatServiceChain);
                             List<CallChain> chains = buildCallChainRecycle(serviceChain,flatCallChain);
                             if(chains!= null && !chains.isEmpty()) {
                                 serviceChain.getCallChainList().addAll(chains);
-                                flatCallChain.addAll(chains);
+//                                flatCallChain.addAll(chains);
                             }
 
 //                            callChains.add(serviceChain);
@@ -678,6 +690,30 @@ public class CallChainAnalyzer {
 
     /** 对外暴露：获取统一方法签名映射（key=namespace.methodId） */
     public Map<String, MapperMethodInfo> getMapperMethodMap() { return Collections.unmodifiableMap(mapperMethodMap); }
+
+    /**
+     * 深度拷贝 CallChain 对象
+     * @param original 原始 CallChain 对象
+     * @return 深度拷贝后的新对象
+     */
+    private CallChain deepCopyCallChain(CallChain original) {
+        if (original == null) {
+            return null;
+        }
+        
+        // 使用 Hutool BeanUtil 进行深度拷贝
+        CallChain copy = BeanUtil.copyProperties(original, CallChain.class);
+        
+//        // 深度拷贝 callChainList
+//        if (original.getCallChainList() != null && !original.getCallChainList().isEmpty()) {
+//            List<CallChain> copiedList = original.getCallChainList().stream()
+//                    .map(this::deepCopyCallChain)
+//                    .collect(Collectors.toList());
+//            copy.setCallChainList(copiedList);
+//        }
+        
+        return copy;
+    }
 
     /**
      * Mapper 方法签名信息
