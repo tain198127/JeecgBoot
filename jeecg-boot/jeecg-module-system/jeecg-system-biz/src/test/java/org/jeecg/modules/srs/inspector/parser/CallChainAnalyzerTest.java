@@ -12,6 +12,7 @@ import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.google.common.collect.Lists;
+import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.srs.inspector.config.SrsInspectorConfig;
 import org.jeecg.modules.srs.inspector.entity.CallChain;
 import org.jeecg.modules.srs.inspector.entity.Endpoint;
@@ -25,15 +26,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
+@Slf4j
 @ExtendWith(MockitoExtension.class)
 class CallChainAnalyzerTest {
 
@@ -104,7 +102,12 @@ class CallChainAnalyzerTest {
         endpoint1.setId("test");
         // Build the call chains for the endpoint
         List<Endpoint> endpoints = Collections.singletonList(endpoint1);
-        List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint1);
+        Set<CallChain> flatCallChain = new HashSet<>();
+        List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint1,flatCallChain);
+        for(CallChain cc : flatCallChain){
+            log.info("flatCallChain:{}",cc);
+        }
+
 
     }
 
@@ -133,9 +136,9 @@ class CallChainAnalyzerTest {
 
         // 初始化调用链分析器
         callChainAnalyzer.init(List.of(mockFile));
-
+        Set<CallChain> flatCallChain = new HashSet<>();
         // 构建调用链
-        List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint);
+        List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint,flatCallChain);
 
         // 验证结果：只有Controller节点
         assertNotNull(callChains);
@@ -157,9 +160,9 @@ class CallChainAnalyzerTest {
 
         // 初始化调用链分析器
         callChainAnalyzer.init(List.of(mockFile));
-
+        Set<CallChain> flatCallChain = new HashSet<>();
         // 构建调用链
-        List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint);
+        List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint,flatCallChain);
 
         // 验证结果：只有Controller节点，因为方法不在methodMap中
         assertNotNull(callChains);

@@ -18,9 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 /**
  * @Description: 调用链
@@ -69,7 +67,8 @@ public class CallChainServiceImpl extends ServiceImpl<CallChainMapper, CallChain
 
             // Build the call chains for the endpoint
             List<Endpoint> endpoints = Collections.singletonList(endpoint);
-            return callChainAnalyzer.buildCallChain(endpoint);
+            Set<CallChain> flatCahin = new HashSet<>();
+            return callChainAnalyzer.buildCallChain(endpoint,flatCahin);
         } catch (IOException e) {
             log.error("Failed to generate call chain for endpoint: {}", endpointId, e);
             return new ArrayList<>();

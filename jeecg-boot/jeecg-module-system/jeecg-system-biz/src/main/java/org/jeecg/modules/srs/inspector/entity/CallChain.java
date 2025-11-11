@@ -8,7 +8,9 @@ import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 
 /**
  * 调用链实体
@@ -46,10 +48,18 @@ public class CallChain implements Serializable {
     private String updateBy;
     /** 更新时间 */
     private Date updateTime;
+    /**
+     * 调用链上
+     */
+    private String parentClassName;
     /** 备注 */
     private String remark;
     /**
      * 调用链中如果是mapper的话，对应的sql内容
      */
     private String sqlContent;
+    /**
+     * 调用链
+     */
+    private List<CallChain> callChainList  = new ArrayList<>();
 }

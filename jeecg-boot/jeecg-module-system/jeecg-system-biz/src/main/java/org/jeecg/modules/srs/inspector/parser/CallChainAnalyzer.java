@@ -26,6 +26,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
@@ -67,6 +68,8 @@ public class CallChainAnalyzer {
     private Map<String, MethodDeclaration> methodMap;
     private Map<String, Integer> classComplexMap;
     private Map<String,Integer> methodComplexMap;
+    private static volatile AtomicBoolean isClassInit = new AtomicBoolean(false);
+    private static volatile AtomicBoolean isMapperInit = new AtomicBoolean(false);
 
     @Autowired
     public CallChainAnalyzer(CodeParser codeParser) {
@@ -83,51 +86,156 @@ public class CallChainAnalyzer {
      * @throws IOException IO异常
      */
     public void init(List<File> javaFiles) throws IOException {
-        for (File file : javaFiles) {
-            CompilationUnit cu = codeParser.parseFile(file);
+        if(isClassInit.compareAndSet(false,true)) {
+            for (File file : javaFiles) {
+                CompilationUnit cu = codeParser.parseFile(file);
 
-            int complexLevel= CyclomaticComplexityCalculator.calculateComplexity(cu);
+                int complexLevel = CodeMetricsComplexityCalculator.calculateClassComplexity(cu);
 
-            // 遍历所有类和接口
-            cu.accept(new VoidVisitorAdapter<Void>() {
-                @Override
-                public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
+                // 遍历所有类和接口
+                cu.accept(new VoidVisitorAdapter<Void>() {
+                    @Override
+                    public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
 
                         String className = cls.getFullyQualifiedName().orElse("");
                         classMap.put(className, cls);
-                        classComplexMap.put(className,complexLevel);
+                        classComplexMap.put(className, complexLevel);
                         // 遍历所有方法
                         for (MethodDeclaration method : cls.getMethods()) {
                             String methodKey = className + "." + method.getNameAsString();
                             methodMap.put(methodKey, method);
-                            int methodComplexLevel = MethodComplexityAnalyzer.calculateMethodComplexity(method);
-                            methodComplexMap.put(methodKey,methodComplexLevel);
+                            int methodComplexLevel = CodeMetricsComplexityCalculator.calculateMethodComplexity(method);
+                            methodComplexMap.put(methodKey, methodComplexLevel);
 
                         }
 
-                    super.visit(cls, arg);
-                }
-            }, null);
+                        super.visit(cls, arg);
+                    }
+                }, null);
+            }
+            if (log.isDebugEnabled()) {
+                classComplexMap.forEach((k, v) -> {
+                    log.debug("class:{},comples:{}", k, v);
+                });
+                methodComplexMap.forEach((k, v) -> {
+                    log.debug("method:{},complex:{}", k, v);
+                });
+            }
         }
+
+
     }
 
+    /**
+     * 递归调用，把所有的调用链都扒出来。
+     * 约束：1. 必须在某个包的范围内
+     * 约束：2. 如果已经找到mapper就返回
+     * 约束：3. 没有找到更多的chain
+     * 每增加一层，就要对上一层的
+     * @param chain
+     * @return
+     */
+    public List<CallChain> buildCallChainRecycle(CallChain chain,Set<CallChain> flatCallChain){
+//        List<CallChain> result = new ArrayList<>();
+        // 查找Service方法调用的Mapper方法
+        String serviceClassName = chain.getClassName();
+        String methodName = chain.getMethodName();
+        String serviceMethodKey = serviceClassName + "." + methodName;
+        ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
+        
+        // 找不到对应的类，返回空列表而不是null
+        if(serviceClass == null){
+            log.debug("找不到类: {}", serviceClassName);
+            return chain.getCallChainList();
+        }
+        
+        boolean isMapper = serviceClass.getAnnotations().stream()
+                .anyMatch(anno -> anno.getNameAsString().equals("Mapper"));
+        //是mapper
+        if(isMapper) {
+            chain.setCallType(CallChainConst.MAPPER);
+            String sqlContent = findMapperXmlSql(serviceClassName, methodName);
+            chain.setSqlContent(sqlContent);
+            return chain.getCallChainList(); // 返回空列表而不是null
+        }
+        
+        MethodDeclaration serviceMethod = methodMap.get(serviceMethodKey);
+        //找不到对应的方法，返回空列表而不是null
+        if(serviceMethod == null){
+            log.debug("找不到方法: {}", serviceMethodKey);
+            return chain.getCallChainList();
+        }
+
+        List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
+        log.debug("方法 {} 中有 {} 个方法调用", serviceMethodKey, serviceMethodCalls.size());
+        
+        for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
+            if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr) {
+                NameExpr serviceScope = (NameExpr) serviceMethodCall.getScope().get();
+                String callerFieldName = serviceScope.getNameAsString();
+                String callerMethodName = serviceMethodCall.getNameAsString();
+                log.debug("callField:{}, callMethod:{}", callerFieldName, callerMethodName);
+                
+                // 修复：使用正确的字段名来查找字段类型
+                String callerClassName = getFieldType(serviceClass, callerFieldName);
+                if(callerClassName == null || callerClassName.isEmpty()){
+                    log.debug("无法解析字段类型: {} 在类 {}", callerFieldName, serviceClassName);
+                    continue;
+                }
+                
+                // 检查被调用的类是否存在
+                ClassOrInterfaceDeclaration callerServiceClass = classMap.get(callerClassName);
+                if(callerServiceClass == null){
+                    log.debug("找不到被调用类: {}", callerClassName);
+                    continue;
+                }
+
+                CallChain callerChain = new CallChain();
+                callerChain.setId(callerClassName + "." + callerMethodName);
+                callerChain.setEndpointId(callerClassName + "." + callerMethodName);
+                callerChain.setLevel(chain.getLevel() + 1);
+                
+                // 判断被调用的是Service还是Mapper
+                boolean isCallerMapper = callerServiceClass.getAnnotations().stream()
+                        .anyMatch(anno -> anno.getNameAsString().equals("Mapper"));
+                callerChain.setCallType(isCallerMapper ? CallChainConst.MAPPER : CallChainConst.SERVICE);
+                callerChain.setClassName(callerClassName);
+                callerChain.setMethodName(callerMethodName);
+                callerChain.setDescription(isCallerMapper ? "Mapper方法" : "Service方法");
+                chain.getCallChainList().add(callerChain);
+                flatCallChain.add(callerChain);
+                
+                // 递归调用，但如果是Mapper就不再继续递归
+                if (!isCallerMapper) {
+                    List<CallChain> subCallChains = buildCallChainRecycle(callerChain,flatCallChain);
+                    if(subCallChains != null && !subCallChains.isEmpty()) {
+                        callerChain.getCallChainList().addAll(subCallChains);
+                        flatCallChain.addAll(subCallChains);
+                    }
+                }
+            }
+        }
+        return chain.getCallChainList();
+    }
     /**
      * 构建接口的调用链
      * @param endpoint 接口信息
      * @return 调用链列表
      */
-    public List<CallChain> buildCallChain(Endpoint endpoint) {
+    public List<CallChain> buildCallChain(Endpoint endpoint,Set<CallChain> flatCallChain) {
         List<CallChain> callChains = new ArrayList<>();
         
         // 构建Controller节点
         CallChain controllerChain = new CallChain();
         controllerChain.setEndpointId(endpoint.getId());
+        controllerChain.setId(endpoint.getId());
         controllerChain.setLevel(0);
         controllerChain.setCallType(0); // 0-Controller
         controllerChain.setClassName(endpoint.getControllerName());
         controllerChain.setMethodName(endpoint.getMethodName());
         controllerChain.setDescription("Controller方法");
         callChains.add(controllerChain);
+        flatCallChain.add(controllerChain);
         
         // 查找Controller方法调用的Service方法
         String controllerMethodKey = endpoint.getControllerName() + "." + endpoint.getMethodName();
@@ -151,58 +259,67 @@ public class CallChainAnalyzer {
                         if (!serviceClassName.isEmpty()) {
                             // 构建Service节点
                             CallChain serviceChain = new CallChain();
+                            serviceChain.setId(serviceClassName+"."+methodName);
                             serviceChain.setEndpointId(endpoint.getId());
                             serviceChain.setLevel(1);
                             serviceChain.setCallType(1); // 1-Service
                             serviceChain.setClassName(serviceClassName);
                             serviceChain.setMethodName(methodName);
                             serviceChain.setDescription("Service方法");
-                            callChains.add(serviceChain);
+                            controllerChain.getCallChainList().add(serviceChain);
+                            flatCallChain.add(serviceChain);
+                            List<CallChain> chains = buildCallChainRecycle(serviceChain,flatCallChain);
+                            if(chains!= null && !chains.isEmpty()) {
+                                serviceChain.getCallChainList().addAll(chains);
+                                flatCallChain.addAll(chains);
+                            }
+
+//                            callChains.add(serviceChain);
                             
                             // 查找Service方法调用的Mapper方法
-                            String serviceMethodKey = serviceClassName + "." + methodName;
-                            MethodDeclaration serviceMethod = methodMap.get(serviceMethodKey);
+//                            String serviceMethodKey = serviceClassName + "." + methodName;
+//                            MethodDeclaration serviceMethod = methodMap.get(serviceMethodKey);
                             
-                            if (serviceMethod != null) {
-                                List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
-                                
-                                for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
-                                    if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr) {
-                                        NameExpr serviceScope = (NameExpr) serviceMethodCall.getScope().get();
-                                        String mapperFieldName = serviceScope.getNameAsString();
-                                        String mapperMethodName = serviceMethodCall.getNameAsString();
-                                        
-                                        // 查找对应的Mapper类
-                                        ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
-                                        if (serviceClass != null) {
-                                            String mapperClassName = getFieldType(serviceClass, mapperFieldName);
-                                            if (!mapperClassName.isEmpty()) {
-                                                // 检查是否是Mapper对象（带有@Mapper注解）
-                                                ClassOrInterfaceDeclaration mapperClass = classMap.get(mapperClassName);
-                                                boolean isMapper = mapperClass != null && mapperClass.getAnnotations().stream()
-                                                        .anyMatch(anno -> anno.getNameAsString().equals("Mapper"));
-                                                
-                                                // 构建Mapper节点
-                                                CallChain mapperChain = new CallChain();
-                                                mapperChain.setEndpointId(endpoint.getId());
-                                                mapperChain.setLevel(isMapper ? 2 : 1); // 如果是Mapper对象，层级为2，否则为1
-                                                mapperChain.setCallType(isMapper ? 2 : 1); // 2-Mapper, 1-Service
-                                                mapperChain.setClassName(mapperClassName);
-                                                mapperChain.setMethodName(mapperMethodName);
-                                                mapperChain.setDescription(isMapper ? "Mapper方法" : "Service方法");
-                                                
-                                                // 如果是Mapper对象，查找对应的XML文件中的SQL内容
-                                                if (isMapper) {
-                                                    String sqlContent = findMapperXmlSql(mapperClassName, mapperMethodName);
-                                                    mapperChain.setSqlContent(sqlContent);
-                                                }
-                                                
-                                                callChains.add(mapperChain);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+//                            if (serviceMethod != null) {
+//                                List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
+//
+//                                for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
+//                                    if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr) {
+//                                        NameExpr serviceScope = (NameExpr) serviceMethodCall.getScope().get();
+//                                        String mapperFieldName = serviceScope.getNameAsString();
+//                                        String mapperMethodName = serviceMethodCall.getNameAsString();
+//
+//                                        // 查找对应的Mapper类
+//                                        ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
+//                                        if (serviceClass != null) {
+//                                            String mapperClassName = getFieldType(serviceClass, mapperFieldName);
+//                                            if (!mapperClassName.isEmpty()) {
+//                                                // 检查是否是Mapper对象（带有@Mapper注解）
+//                                                ClassOrInterfaceDeclaration mapperClass = classMap.get(mapperClassName);
+//                                                boolean isMapper = mapperClass != null && mapperClass.getAnnotations().stream()
+//                                                        .anyMatch(anno -> anno.getNameAsString().equals("Mapper"));
+//
+//                                                // 构建Mapper节点
+//                                                CallChain mapperChain = new CallChain();
+//                                                mapperChain.setEndpointId(endpoint.getId());
+//                                                mapperChain.setLevel(isMapper ? 2 : 1); // 如果是Mapper对象，层级为2，否则为1
+//                                                mapperChain.setCallType(isMapper ? 2 : 1); // 2-Mapper, 1-Service
+//                                                mapperChain.setClassName(mapperClassName);
+//                                                mapperChain.setMethodName(mapperMethodName);
+//                                                mapperChain.setDescription(isMapper ? "Mapper方法" : "Service方法");
+//
+//                                                // 如果是Mapper对象，查找对应的XML文件中的SQL内容
+//                                                if (isMapper) {
+//                                                    String sqlContent = findMapperXmlSql(mapperClassName, mapperMethodName);
+//                                                    mapperChain.setSqlContent(sqlContent);
+//                                                }
+//
+//                                                callChains.add(mapperChain);
+//                                            }
+//                                        }
+//                                    }
+//                                }
+//                            }
                         }
                     }
                 }
@@ -398,68 +515,67 @@ public class CallChainAnalyzer {
      * @param directoryPath 待扫描的根目录绝对路径或相对路径
      */
     public void initmapper(String directoryPath) {
-        mybatisXmlMap.clear();
-        mapperMethodMap.clear();
+        if(isMapperInit.compareAndSet(false,true)) {
+            mybatisXmlMap.clear();
+            mapperMethodMap.clear();
 
-        if (directoryPath == null || directoryPath.trim().isEmpty()) {
-            return;
-        }
-        File root = new File(directoryPath);
-        if (!root.exists() || !root.isDirectory()) {
-            return;
-        }
-
-        List<File> xmlFiles = new ArrayList<>();
-        collectXmlFiles(root, xmlFiles);
-
-        for (File xml : xmlFiles) {
-            try {
-                // 使用 MyBatis 工具类验证 XML 是否为合法的 MyBatis Mapper
-                if (!isValidMyBatisXml(xml)) {
-                    continue;
-                }
-
-
-
-
-                XMLMapperBuilder xmlMapperBuilder = new XMLMapperBuilder(
-                    new FileInputStream(xml),
-                        mybatisConfiguration,
-                    xml.getAbsolutePath(),
-                        mybatisConfiguration.getSqlFragments()
-                );
-                xmlMapperBuilder.parse();
-
-
-            } catch (Exception ignore) {
-                log.debug("识别mapper失败", ignore);
-                // 非法或不可解析的 XML 直接忽略
+            if (directoryPath == null || directoryPath.trim().isEmpty()) {
+                return;
             }
-        }
-        // 获取解析后的 MappedStatement 信息
-        @NotNull List<MappedStatement> statements = mybatisConfiguration.getMappedStatements().stream().distinct().collect(Collectors.toList());
+            File root = new File(directoryPath);
+            if (!root.exists() || !root.isDirectory()) {
+                return;
+            }
 
-        for (int i = 0; i < statements.size();i++) {
-            try {
-                if(statements.get(i) instanceof MappedStatement) {
-                    MappedStatement stat = statements.get(i);
-                    try {
-                        String namespace = stat.getId().substring(0, stat.getId().lastIndexOf('.'));
-                        String methodName = stat.getId().substring(stat.getId().lastIndexOf('.') + 1);
-                        MappedStatement mappedStatement = mybatisConfiguration.getMappedStatement(stat.getId());
-                        String parameterType = mappedStatement.getParameterMap().getType() != null ?
-                                mappedStatement.getParameterMap().getType().getName() : "";
+            List<File> xmlFiles = new ArrayList<>();
+            collectXmlFiles(root, xmlFiles);
 
-                        // 存入 mybatisXmlMap 和 mapperMethodMap
-                        mybatisXmlMap.put(namespace, new File(stat.getResource()));
-                        mapperMethodMap.put(stat.getId(), new MapperMethodInfo(namespace, methodName, parameterType));
-                    } catch (Exception ex) {
-                        log.error("stat:{}报错", stat, ex);
+            for (File xml : xmlFiles) {
+                try {
+                    // 使用 MyBatis 工具类验证 XML 是否为合法的 MyBatis Mapper
+                    if (!isValidMyBatisXml(xml)) {
+                        continue;
                     }
+
+
+                    XMLMapperBuilder xmlMapperBuilder = new XMLMapperBuilder(
+                            new FileInputStream(xml),
+                            mybatisConfiguration,
+                            xml.getAbsolutePath(),
+                            mybatisConfiguration.getSqlFragments()
+                    );
+                    xmlMapperBuilder.parse();
+
+
+                } catch (Exception ignore) {
+                    log.debug("识别mapper失败", ignore);
+                    // 非法或不可解析的 XML 直接忽略
                 }
             }
-            catch (Exception eex){
-                log.error("解析mappered statment失败:{}",i,eex);
+            // 获取解析后的 MappedStatement 信息
+            @NotNull List<MappedStatement> statements = mybatisConfiguration.getMappedStatements().stream().distinct().collect(Collectors.toList());
+
+            for (int i = 0; i < statements.size(); i++) {
+                try {
+                    if (statements.get(i) instanceof MappedStatement) {
+                        MappedStatement stat = statements.get(i);
+                        try {
+                            String namespace = stat.getId().substring(0, stat.getId().lastIndexOf('.'));
+                            String methodName = stat.getId().substring(stat.getId().lastIndexOf('.') + 1);
+                            MappedStatement mappedStatement = mybatisConfiguration.getMappedStatement(stat.getId());
+                            String parameterType = mappedStatement.getParameterMap().getType() != null ?
+                                    mappedStatement.getParameterMap().getType().getName() : "";
+
+                            // 存入 mybatisXmlMap 和 mapperMethodMap
+                            mybatisXmlMap.put(namespace, new File(stat.getResource()));
+                            mapperMethodMap.put(stat.getId(), new MapperMethodInfo(namespace, methodName, parameterType));
+                        } catch (Exception ex) {
+                            log.error("stat:{}报错", stat, ex);
+                        }
+                    }
+                } catch (Exception eex) {
+                    log.error("解析mappered statment失败:{}", i, eex);
+                }
             }
         }
     }
