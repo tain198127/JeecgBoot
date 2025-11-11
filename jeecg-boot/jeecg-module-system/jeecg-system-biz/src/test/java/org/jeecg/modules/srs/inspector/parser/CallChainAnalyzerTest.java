@@ -104,9 +104,15 @@ class CallChainAnalyzerTest {
         List<Endpoint> endpoints = Collections.singletonList(endpoint1);
         Set<CallChain> flatCallChain = new HashSet<>();
         List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint1,flatCallChain);
+        
+        // 打印扁平化调用链
         for(CallChain cc : flatCallChain){
             log.info("flatCallChain:{}",cc);
         }
+        
+        // 打印树形结构调用链
+        log.info("=== 树形结构调用链 ===");
+        printCallChainTree(callChains, 0);
 
 
     }
@@ -168,5 +174,59 @@ class CallChainAnalyzerTest {
         assertNotNull(callChains);
         assertEquals(1, callChains.size());
         assertEquals("Controller方法", callChains.get(0).getDescription());
+    }
+
+    /**
+     * 按照先序遍历打印调用链树形结构
+     * @param callChains 调用链列表
+     * @param level 当前层级（用于缩进）
+     */
+    private void printCallChainTree(List<CallChain> callChains, int level) {
+        if (callChains == null || callChains.isEmpty()) {
+            return;
+        }
+
+        for (CallChain chain : callChains) {
+            // 生成缩进字符串
+            String indent = "|".repeat(level);
+            if (level > 0) {
+                indent += "--";
+            }
+            
+            // 打印当前节点信息
+            String nodeInfo = String.format("%s[%s] %s.%s - %s (Level: %d)",
+                    indent,
+                    getCallTypeName(chain.getCallType()),
+                    chain.getClassName(),
+                    chain.getMethodName(),
+                    chain.getDescription(),
+                    chain.getLevel());
+            
+            log.info(nodeInfo);
+            
+            // 递归打印子节点（先序遍历）
+            if (chain.getCallChainList() != null && !chain.getCallChainList().isEmpty()) {
+                printCallChainTree(chain.getCallChainList(), level + 1);
+            }
+        }
+    }
+
+    /**
+     * 获取调用类型名称
+     * @param callType 调用类型代码
+     * @return 调用类型名称
+     */
+    private String getCallTypeName(Integer callType) {
+        if (callType == null) {
+            return "Unknown";
+        }
+        
+        switch (callType) {
+            case 0: return "Controller";
+            case 1: return "Service";
+            case 2: return "Mapper";
+            case 3: return "Other";
+            default: return "Unknown";
+        }
     }
 }
