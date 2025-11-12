@@ -36,8 +36,16 @@ public class CallChain implements Serializable {
     private Integer callType;
     /** 类名 */
     private String className;
+    /**
+     * 类的复杂度
+     */
+    private Long classComplexScore;
     /** 方法名 */
     private String methodName;
+    /**
+     * 方法复杂度
+     */
+    private Long methodComplexScore;
     /** 描述 */
     private String description;
     /** 创建人 */

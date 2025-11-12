@@ -64,7 +64,15 @@ public class CallChainAnalyzer {
 
     };
 
-
+    /**
+     * 跟idea的方法名对齐
+     * @param className
+     * @param methodName
+     * @return
+     */
+    public static String methodKey(String className, String methodName){
+        return className +"."+methodName;
+    }
     private CodeParser codeParser;
     private Map<String, ClassOrInterfaceDeclaration> classMap;
     private Map<String, MethodDeclaration> methodMap;
@@ -104,7 +112,8 @@ public class CallChainAnalyzer {
                         classComplexMap.put(className, complexLevel);
                         // 遍历所有方法
                         for (MethodDeclaration method : cls.getMethods()) {
-                            String methodKey = className + "." + method.getNameAsString();
+
+                            String methodKey = methodKey(className,method.getNameAsString());
                             methodMap.put(methodKey, method);
                             int methodComplexLevel = CodeMetricsComplexityCalculator.calculateMethodComplexity(method);
                             methodComplexMap.put(methodKey, methodComplexLevel);
@@ -142,7 +151,7 @@ public class CallChainAnalyzer {
         // 查找Service方法调用的Mapper方法
         String serviceClassName = chain.getClassName();
         String methodName = chain.getMethodName();
-        String serviceMethodKey = serviceClassName + "." + methodName;
+        String serviceMethodKey = methodKey(serviceClassName,methodName);
         ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
         
         // 找不到对应的类，返回空列表而不是null
@@ -193,8 +202,8 @@ public class CallChainAnalyzer {
                 }
 
                 CallChain callerChain = new CallChain();
-                callerChain.setId(callerClassName + "." + callerMethodName);
-                callerChain.setEndpointId(callerClassName + "." + callerMethodName);
+                callerChain.setId(methodKey(callerClassName , callerMethodName));
+                callerChain.setEndpointId(methodKey(callerClassName , callerMethodName));
                 callerChain.setLevel(chain.getLevel() + 1);
                 
                 // 判断被调用的是Service还是Mapper
@@ -204,6 +213,8 @@ public class CallChainAnalyzer {
                 callerChain.setClassName(callerClassName);
                 callerChain.setMethodName(callerMethodName);
                 callerChain.setDescription(isCallerMapper ? "Mapper方法" : "Service方法");
+                callerChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(callerClassName)).orElse(0)));
+                callerChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(callerClassName , callerMethodName))).orElse(0)));
                 chain.getCallChainList().add(callerChain);
                 
                 // 深度拷贝 CallChain 对象后再添加到 flatCallChain
@@ -226,14 +237,19 @@ public class CallChainAnalyzer {
         }
         return chain.getCallChainList();
     }
+
     /**
      * 构建接口的调用链
      * @param endpoint 接口信息
      * @return 调用链列表
      */
-    public List<CallChain> buildCallChain(Endpoint endpoint,Set<CallChain> flatCallChain) {
+    public List<CallChain> buildCallChain(Endpoint endpoint,Set<CallChain> flatCallChainVar) {
         List<CallChain> callChains = new ArrayList<>();
-        
+        Set<CallChain> innerFlatCallChain = new HashSet<>();
+        if(flatCallChainVar != null){
+            innerFlatCallChain = flatCallChainVar;
+        }
+
         // 构建Controller节点
         CallChain controllerChain = new CallChain();
         controllerChain.setEndpointId(endpoint.getId());
@@ -243,12 +259,14 @@ public class CallChainAnalyzer {
         controllerChain.setClassName(endpoint.getControllerName());
         controllerChain.setMethodName(endpoint.getMethodName());
         controllerChain.setDescription("Controller方法");
+        controllerChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(endpoint.getControllerName())).orElse(0)));
+        controllerChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(endpoint.getControllerName(),endpoint.getMethodName()))).orElse(0)));
         callChains.add(controllerChain);
         CallChain flatcontrollerChain = deepCopyCallChain(controllerChain);
-        flatCallChain.add(flatcontrollerChain);
+        innerFlatCallChain.add(flatcontrollerChain);
         
         // 查找Controller方法调用的Service方法
-        String controllerMethodKey = endpoint.getControllerName() + "." + endpoint.getMethodName();
+        String controllerMethodKey = methodKey(endpoint.getControllerName() , endpoint.getMethodName());
         MethodDeclaration controllerMethod = methodMap.get(controllerMethodKey);
         
         if (controllerMethod != null) {
@@ -269,18 +287,20 @@ public class CallChainAnalyzer {
                         if (!serviceClassName.isEmpty()) {
                             // 构建Service节点
                             CallChain serviceChain = new CallChain();
-                            serviceChain.setId(serviceClassName+"."+methodName);
+                            serviceChain.setId(methodKey(serviceClassName,methodName));
                             serviceChain.setEndpointId(endpoint.getId());
                             serviceChain.setLevel(1);
                             serviceChain.setCallType(1); // 1-Service
                             serviceChain.setClassName(serviceClassName);
                             serviceChain.setMethodName(methodName);
                             serviceChain.setDescription("Service方法");
+                            serviceChain.setClassComplexScore(Long.valueOf(classComplexMap.get(serviceClassName)));
+                            serviceChain.setMethodComplexScore(Long.valueOf(methodComplexMap.get(methodKey(serviceClassName,methodName))));
                             controllerChain.getCallChainList().add(serviceChain);
                             // 深度拷贝 CallChain 对象后再添加到 flatCallChain
                             CallChain flatServiceChain = deepCopyCallChain(serviceChain);
-                            flatCallChain.add(flatServiceChain);
-                            List<CallChain> chains = buildCallChainRecycle(serviceChain,flatCallChain);
+                            innerFlatCallChain.add(flatServiceChain);
+                            List<CallChain> chains = buildCallChainRecycle(serviceChain,innerFlatCallChain);
                             if(chains!= null && !chains.isEmpty()) {
                                 serviceChain.getCallChainList().addAll(chains);
 //                                flatCallChain.addAll(chains);
@@ -337,7 +357,8 @@ public class CallChainAnalyzer {
                 }
             }
         }
-        
+        long allMethodComplexScore = innerFlatCallChain.stream().filter(item->item.getMethodComplexScore()!= null).map(item->item.getMethodComplexScore()).reduce((a,b)->a+b).get();
+        endpoint.setSumAllComplexScore(allMethodComplexScore);
         return callChains;
     }
 
@@ -496,7 +517,7 @@ public class CallChainAnalyzer {
             xmlMapperBuilder.parse();
 
             // 从 Configuration 中获取 MappedStatement
-            String statementId = mapperClassName + "." + methodName;
+            String statementId = methodKey(mapperClassName , methodName);
             if (mybatisConfiguration.hasStatement(statementId)) {
                 return mybatisConfiguration.getMappedStatement(statementId).getBoundSql(null).getSql();
             }

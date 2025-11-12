@@ -54,4 +54,8 @@ public class Endpoint implements Serializable {
     private Date updateTime;
     /** 备注 */
     private String remark;
+    /**
+     * 该接口下所有复杂度综合
+     */
+    private Long sumAllComplexScore;
 }
