@@ -1,6 +1,7 @@
 package org.jeecg.modules.srs.inspector.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Mapper;
 import org.jeecg.modules.srs.inspector.entity.CallChain;
 
 /**
@@ -9,6 +10,7 @@ import org.jeecg.modules.srs.inspector.entity.CallChain;
  * @Date:   2025-01-01
  * @Version: V1.0
  */
+@Mapper
 public interface CallChainMapper extends BaseMapper<CallChain> {
 
 }

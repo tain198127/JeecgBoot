@@ -11,6 +11,8 @@ import org.jeecg.modules.srs.inspector.service.IIssueService;
 import org.jeecg.modules.srs.inspector.service.IParameterService;
 import org.jeecg.modules.srs.inspector.service.IScanTaskService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,6 +24,7 @@ import java.util.List;
  * @since 2025-01-01
  */
 @RestController
+@Component
 @RequestMapping("/srs/inspector")
 public class SrsInspectorController {
 

@@ -46,6 +46,10 @@ public class CallChainServiceImpl extends ServiceImpl<CallChainMapper, CallChain
     @Autowired
     private IModelService modelService;
 
+    public void scanAll(){
+
+    }
+
     @Override
     public List<CallChain> getCallChainByEndpointId(String endpointId) {
         // Get the endpoint from the database
