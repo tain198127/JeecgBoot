@@ -112,13 +112,13 @@ public class CallChainAnalyzer {
 
     // 初始化符号解析器
     static {
-
-        CombinedTypeSolver solver = new CombinedTypeSolver();
-        solver.add(new ReflectionTypeSolver());
-        solver.add(new JavaParserTypeSolver(Paths.get("src/main/java")));
-
-        JavaSymbolSolver symbolSolver = new JavaSymbolSolver(solver);
-        com.github.javaparser.StaticJavaParser.getConfiguration().setSymbolResolver(symbolSolver);
+//
+//        CombinedTypeSolver solver = new CombinedTypeSolver();
+//        solver.add(new ReflectionTypeSolver());
+//        solver.add(new JavaParserTypeSolver(Paths.get("src/main/java")));
+//
+//        JavaSymbolSolver symbolSolver = new JavaSymbolSolver(solver);
+//        com.github.javaparser.StaticJavaParser.getConfiguration().setSymbolResolver(symbolSolver);
 
         // 对于 JavaParser 3.x 版本，符号解析器在解析时自动使用，无需手动设置
         // 符号解析器会在需要时通过类型解析器自动工作
@@ -151,6 +151,12 @@ public class CallChainAnalyzer {
      */
     public void init(List<File> javaFiles) throws IOException {
         if (isClassInit.compareAndSet(false, true)) {
+            // 获取所有文件的父目录路径（去重）
+            List<String> parentDirs = javaFiles.stream()
+                    .map(file -> file.getParentFile().getAbsolutePath())
+                    .distinct()
+                    .toList();
+            codeParser.init(parentDirs);
             for (File file : javaFiles) {
                 CompilationUnit cu = codeParser.parseFile(file);
 
@@ -219,7 +225,7 @@ public class CallChainAnalyzer {
         boolean isMapper = CallChainConst.MAPPER == clsType;
         //是mapper
         if (isMapper) {
-            chain.setCallType(getClassType(classMap.get(serviceClass)));
+            chain.setCallType(getClassType(serviceClass));
             String sqlContent = findMapperXmlSql(serviceClassName, methodName);
             chain.setSqlContent(sqlContent);
             return chain.getCallChainList(); // 返回空列表而不是null
@@ -272,7 +278,10 @@ public class CallChainAnalyzer {
                 callerChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(callerClassName)).orElse(0)));
                 callerChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(callerClassName, callerMethodName))).orElse(0)));
                 chain.getCallChainList().add(callerChain);
-
+                if(isCallerMapper){
+                    String sqlContent = findMapperXmlSql(callerClassName, callerMethodName);
+                    callerChain.setSqlContent(sqlContent);
+                }
                 // 深度拷贝 CallChain 对象后再添加到 flatCallChain
                 CallChain flatCallChainItem = deepCopyCallChain(callerChain);
                 flatCallChain.add(flatCallChainItem);
@@ -336,25 +345,42 @@ public class CallChainAnalyzer {
         return CallChainConst.OTHER;
 
     }
+    /**
+     * 检查类型是否是 MyBatis 核心 Mapper 接口
+     * @param type 类型
+     * @return 如果是 MyBatis 核心 Mapper 接口，返回 true；否则返回 false
+     */
+    private static boolean isMyBatisMapperType(ClassOrInterfaceType type) {
+        String typeName = type.getNameAsString();
+        Optional<String> scope = type.getScope().map(scopeExpr -> scopeExpr.toString());
 
+        // 检查是否是 MyBatis-Plus 的 Mapper 接口
+        return typeName.equals("BaseMapper");
+    }
     public static boolean extendsInterfaceSimple(ClassOrInterfaceDeclaration declaration, String targetInterface) {
+        if (declaration == null || targetInterface == null) {
+            return false;
+        }
+
         if (!declaration.isInterface()) {
             return false;
         }
 
         try {
-            ResolvedReferenceTypeDeclaration resolved = declaration.resolve();
-
-            // 直接检查所有祖先
-            return resolved.getAllAncestors().stream()
-                    .anyMatch(ancestor -> ancestor.getQualifiedName().equals(targetInterface));
-
+            boolean isInheritBaseMapper = declaration.getExtendedTypes().stream().anyMatch(item->isMyBatisMapperType(item));
+            if(!isInheritBaseMapper){
+                isInheritBaseMapper = extendsInterface(declaration,targetInterface);
+            }
+            return isInheritBaseMapper;
         } catch (Exception e) {
-            log.error("Failed to resolve: {}是否继承自:{}，检查出错", declaration,targetInterface,e);
+            // 解析失败时记录警告而不是错误，因为这在某些情况下是正常的
+            String className = declaration.getFullyQualifiedName().orElse(declaration.getNameAsString());
+            log.debug("Failed to resolve interface: {} when checking if it extends: {}, reason: {}",
+                     className, targetInterface, e.getMessage());
             return false;
         }
     }
-    private static final String TARGET_INTERFACE = "com.baomidou.mybatisplus.core.mapper.Mapper";
+    private static final String TARGET_INTERFACE = "com.baomidou.mybatisplus.core.mapper.BaseMapper";
     /**
      * 判断接口是否继承了指定的目标接口（支持多级继承）
      *
@@ -795,7 +821,7 @@ public class CallChainAnalyzer {
             xmlMapperBuilder.parse();
 
             // 从 Configuration 中获取 MappedStatement
-            String statementId = processSharpKey2DotKey(methodKey(mapperClassName, methodName)) ;
+            String statementId = mapperClassName+"."+methodName ;
 
             if (mybatisConfiguration.hasStatement(statementId)) {
                 return mybatisConfiguration.getMappedStatement(statementId).getBoundSql(null).getSql();
