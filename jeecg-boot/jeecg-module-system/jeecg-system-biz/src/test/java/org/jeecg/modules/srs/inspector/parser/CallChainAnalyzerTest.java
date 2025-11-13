@@ -97,7 +97,9 @@ class CallChainAnalyzerTest {
         List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
         assertNotNull(controllers);
         assertTrue(controllers.size()>0);
-        controllers.forEach(item->log.info("ctrl:{},score:{}",item.getId(),item.getSumAllComplexScore()));
+        controllers.forEach(item->{
+            log.info("ctrl:{},score:{},callchainlist:{}",item.getId(),item.getSumAllComplexScore(),item.getFlattenCallChain().size());
+        });
 
     }
 

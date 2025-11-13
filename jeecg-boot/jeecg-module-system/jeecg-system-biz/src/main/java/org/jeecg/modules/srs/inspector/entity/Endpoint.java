@@ -10,6 +10,7 @@ import lombok.experimental.Accessors;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 接口实体
@@ -61,4 +62,8 @@ public class Endpoint implements Serializable {
     private Long sumAllComplexScore;
 
     private List<CallChain> callChainList;
+    /**
+     * 拉平以后得list
+     */
+    private Set<CallChain> flattenCallChain;
 }

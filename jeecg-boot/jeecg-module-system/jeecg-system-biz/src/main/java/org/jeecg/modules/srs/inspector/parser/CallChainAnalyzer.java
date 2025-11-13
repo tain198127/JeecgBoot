@@ -656,6 +656,7 @@ public class CallChainAnalyzer {
         long allMethodComplexScore = innerFlatCallChain.stream().filter(item -> item.getMethodComplexScore() != null).map(item -> item.getMethodComplexScore()).reduce((a, b) -> a + b).get();
         endpoint.setSumAllComplexScore(allMethodComplexScore);
         endpoint.setCallChainList(callChains);
+        endpoint.setFlattenCallChain(innerFlatCallChain);
         return callChains;
     }
 
@@ -824,10 +825,11 @@ public class CallChainAnalyzer {
             String statementId = mapperClassName+"."+methodName ;
 
             if (mybatisConfiguration.hasStatement(statementId)) {
+
                 return mybatisConfiguration.getMappedStatement(statementId).getBoundSql(null).getSql();
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.debug("解析mybatis报错:{}.{}",mapperClassName,methodName,e);
         }
         return "";
     }
