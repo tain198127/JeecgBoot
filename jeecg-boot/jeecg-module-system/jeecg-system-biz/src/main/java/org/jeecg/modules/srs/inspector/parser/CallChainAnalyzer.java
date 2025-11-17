@@ -453,51 +453,11 @@ public class CallChainAnalyzer {
             return false;
 
         } catch (Exception e) {
-            System.err.println("Failed to resolve declaration: " + e.getMessage());
+            log.error("Failed to resolve declaration",e);
             return false;
         }
     }
 
-//    /**
-//     * 检查类型是否是 MyBatis 核心 Mapper 接口
-//     * @param type 类型
-//     * @return 如果是 MyBatis 核心 Mapper 接口，返回 true；否则返回 false
-//     */
-//    private static boolean isMyBatisMapperType(ClassOrInterfaceDeclaration decl) {
-//        try {
-//            ResolvedReferenceTypeDeclaration resolved = decl.resolve();
-//            return isIndirectlyExtendsMyBatisMapper(resolved);
-//        } catch (Exception e) {
-//            // 无法解析时，安全返回 false
-//            return false;
-//        }
-//    }
-//    private static final String TARGET_INTERFACE = "com.baomidou.mybatisplus.core.mapper.Mapper";
-//    /**
-//     * 检查是否间接继承了 MyBatis 核心 Mapper 接口
-//     * @param typeDecl 类型
-//     * @return 如果是间接继承，返回 true；否则返回 false
-//     */
-//    private static boolean isIndirectlyExtendsMyBatisMapper(ResolvedReferenceTypeDeclaration typeDecl) {
-//        // 检查当前接口
-//        String qualifiedName = typeDecl.getQualifiedName();
-//        if (TARGET_INTERFACE.equals(qualifiedName)) {
-//            return true;
-//        }
-//
-//        // 递归检查所有父接口
-//        List<ResolvedReferenceType> ancestors = typeDecl.getAncestors();
-//        for (ResolvedReferenceType ancestor : ancestors) {
-//            try {
-//                ResolvedReferenceTypeDeclaration ancestorDecl = ancestor.getTypeDeclaration().get();
-//                if (ancestorDecl != null && isIndirectlyExtendsMyBatisMapper(ancestorDecl)) {
-//                    return true;
-//                }
-//            } catch (Throwable ignore) {
-//            }
-//        }
-//        return false;
-//    }
 
     /**
      * 扫描所有的endpoint，并扫描对应的callchain
@@ -596,64 +556,23 @@ public class CallChainAnalyzer {
                             // 深度拷贝 CallChain 对象后再添加到 flatCallChain
                             CallChain flatServiceChain = deepCopyCallChain(serviceChain);
                             innerFlatCallChain.add(flatServiceChain);
+                            //h核心方法
                             List<CallChain> chains = buildCallChainRecycle(serviceChain, innerFlatCallChain);
                             if (chains != null && !chains.isEmpty()) {
                                 serviceChain.getCallChainList().addAll(chains);
-//                                flatCallChain.addAll(chains);
                             }
-
-//                            callChains.add(serviceChain);
-
-                            // 查找Service方法调用的Mapper方法
-//                            String serviceMethodKey = serviceClassName + "." + methodName;
-//                            MethodDeclaration serviceMethod = methodMap.get(serviceMethodKey);
-
-//                            if (serviceMethod != null) {
-//                                List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
-//
-//                                for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
-//                                    if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr) {
-//                                        NameExpr serviceScope = (NameExpr) serviceMethodCall.getScope().get();
-//                                        String mapperFieldName = serviceScope.getNameAsString();
-//                                        String mapperMethodName = serviceMethodCall.getNameAsString();
-//
-//                                        // 查找对应的Mapper类
-//                                        ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
-//                                        if (serviceClass != null) {
-//                                            String mapperClassName = getFieldType(serviceClass, mapperFieldName);
-//                                            if (!mapperClassName.isEmpty()) {
-//                                                // 检查是否是Mapper对象（带有@Mapper注解）
-//                                                ClassOrInterfaceDeclaration mapperClass = classMap.get(mapperClassName);
-//                                                boolean isMapper = mapperClass != null && mapperClass.getAnnotations().stream()
-//                                                        .anyMatch(anno -> anno.getNameAsString().equals("Mapper"));
-//
-//                                                // 构建Mapper节点
-//                                                CallChain mapperChain = new CallChain();
-//                                                mapperChain.setEndpointId(endpoint.getId());
-//                                                mapperChain.setLevel(isMapper ? 2 : 1); // 如果是Mapper对象，层级为2，否则为1
-//                                                mapperChain.setCallType(isMapper ? 2 : 1); // 2-Mapper, 1-Service
-//                                                mapperChain.setClassName(mapperClassName);
-//                                                mapperChain.setMethodName(mapperMethodName);
-//                                                mapperChain.setDescription(isMapper ? "Mapper方法" : "Service方法");
-//
-//                                                // 如果是Mapper对象，查找对应的XML文件中的SQL内容
-//                                                if (isMapper) {
-//                                                    String sqlContent = findMapperXmlSql(mapperClassName, mapperMethodName);
-//                                                    mapperChain.setSqlContent(sqlContent);
-//                                                }
-//
-//                                                callChains.add(mapperChain);
-//                                            }
-//                                        }
-//                                    }
-//                                }
-//                            }
                         }
                     }
                 }
             }
         }
-        long allMethodComplexScore = innerFlatCallChain.stream().filter(item -> item.getMethodComplexScore() != null).map(item -> item.getMethodComplexScore()).reduce((a, b) -> a + b).get();
+        long allMethodComplexScore = 0;
+        for(CallChain cc : innerFlatCallChain){
+            allMethodComplexScore += cc.getMethodComplexScore();
+        }
+//        long allMethodComplexScore = innerFlatCallChain.stream().filter(item -> item.getMethodComplexScore() != null)
+//                .map(item -> item.getMethodComplexScore())
+//                .reduce((a, b) -> a + b).get();
         endpoint.setSumAllComplexScore(allMethodComplexScore);
         endpoint.setCallChainList(callChains);
         endpoint.setFlattenCallChain(innerFlatCallChain);
