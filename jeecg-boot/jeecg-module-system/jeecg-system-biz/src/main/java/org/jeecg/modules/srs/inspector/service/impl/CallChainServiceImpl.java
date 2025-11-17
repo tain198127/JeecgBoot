@@ -1,5 +1,6 @@
 package org.jeecg.modules.srs.inspector.service.impl;
 
+import cn.hutool.core.collection.ListUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.modules.srs.inspector.config.SrsInspectorConfig;
@@ -46,8 +47,53 @@ public class CallChainServiceImpl extends ServiceImpl<CallChainMapper, CallChain
     @Autowired
     private IModelService modelService;
 
-    public void scanAll(){
-
+    /**
+     * 分析所有代码，并生成csv文件
+     */
+    public void scanAll() throws IOException {
+        List<File> javaFiles = new ArrayList<>();
+        for (String scanPath : config.getScanPaths()) {
+            javaFiles.addAll(codeParser.scanJavaFiles(scanPath));
+        }
+        // Initialize the call chain analyzer
+        callChainAnalyzer.init(javaFiles);
+        callChainAnalyzer.initmapper(config.getScanPaths().get(0));
+        List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
+        
+        // 生成CSV文件
+        generateCsvFile(controllers);
+    }
+    
+    /**
+     * 生成CSV文件
+     * @param controllers 接口列表
+     */
+    private void generateCsvFile(List<Endpoint> controllers) throws IOException {
+        // 生成带时间戳的文件名
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        String fileName = "controllers_" + timestamp + ".csv";
+        
+        // 构建CSV内容
+        StringBuilder csvContent = new StringBuilder();
+        // CSV头部
+        csvContent.append("ID,METHOD,controllerName,score\n");
+        
+        // 写入数据
+        for (Endpoint endpoint : controllers) {
+            csvContent.append(endpoint.getId()).append(",")
+                      .append(endpoint.getMethodName()).append(",")
+                      .append(endpoint.getControllerName()).append(",")
+                    .append(endpoint.getSumAllComplexScore())
+                    .append("\n");
+        }
+        
+        // 写入文件
+        java.nio.file.Files.write(
+            java.nio.file.Paths.get(fileName),
+            csvContent.toString().getBytes("UTF-8")
+        );
+        
+        log.info("CSV文件已生成: {}", fileName);
     }
 
     @Override

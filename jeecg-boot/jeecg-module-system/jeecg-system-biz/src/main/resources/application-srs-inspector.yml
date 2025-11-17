@@ -15,7 +15,7 @@ srs:
   inspector:
     # 扫描路径
     scan-paths:
-      - /Users/baodan/develop/git/trae_demo/JeecgBoot/jeecg-boot/jeecg-module-system/jeecg-system-biz/src/main/java
+      - /Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy
     # 并发度
     concurrency: 5
     # 排除的目录

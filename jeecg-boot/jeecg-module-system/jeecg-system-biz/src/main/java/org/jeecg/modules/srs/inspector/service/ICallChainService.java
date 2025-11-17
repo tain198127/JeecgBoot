@@ -1,6 +1,8 @@
 package org.jeecg.modules.srs.inspector.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+
+import java.io.IOException;
 import java.util.List;
 import org.jeecg.modules.srs.inspector.entity.CallChain;
 
@@ -25,4 +27,9 @@ public interface ICallChainService extends IService<CallChain> {
      * @return 生成的文档
      */
     String generateDocumentation(String endpointId);
+
+    /**
+     * 扫描所有
+     */
+    void scanAll() throws IOException;
 }

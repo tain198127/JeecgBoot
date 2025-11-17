@@ -230,6 +230,7 @@ public class CodeParser {
             body.accept(new VoidVisitorAdapter<Void>() {
                 @Override
                 public void visit(MethodCallExpr n, Void arg) {
+
                     methodCalls.add(n);
                     super.visit(n, arg);
                 }

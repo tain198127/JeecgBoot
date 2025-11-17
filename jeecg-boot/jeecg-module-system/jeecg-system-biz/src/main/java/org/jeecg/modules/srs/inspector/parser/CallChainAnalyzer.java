@@ -14,10 +14,12 @@ import com.jeecg.weibo.exception.BusinessException;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.calcite.util.DateTimeStringUtils;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.type.TypeAliasRegistry;
+import org.jeecg.common.util.DateUtils;
 import org.jeecg.modules.srs.inspector.entity.CallChain;
 import org.jeecg.modules.srs.inspector.entity.Endpoint;
 import org.jetbrains.annotations.NotNull;
@@ -62,6 +64,7 @@ public class CallChainAnalyzer {
     private final Map<String, ClzAndMethod> methodMap;
     private final Map<String, Integer> classComplexMap;
     private final Map<String, Integer> methodComplexMap;
+    private final Set<String> methodInvokeTag;
     // 解析 XML 文件
     Configuration mybatisConfiguration = new Configuration() {
         @Override
@@ -88,6 +91,7 @@ public class CallChainAnalyzer {
         this.methodMap = new HashMap<>();
         this.classComplexMap = new HashMap();
         this.methodComplexMap = new HashMap<>();
+        this.methodInvokeTag = new HashSet<>();
     }
 
     /**
@@ -292,6 +296,24 @@ public class CallChainAnalyzer {
     }
 
     /**
+     * 获取被调用函数所在的类
+     * @param serviceClass
+     * @param serviceMethodCall
+     * @return
+     */
+    private String getCalleeClassName(ClassOrInterfaceDeclaration serviceClass,MethodCallExpr serviceMethodCall){
+        if( serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr serviceScope){
+            String callerFieldName  =serviceScope.getNameAsString();
+            return getFieldType(serviceClass, callerFieldName);
+
+        }
+        else{
+            return serviceClass.getFullyQualifiedName().get();
+        }
+
+
+    }
+    /**
      * 递归调用，把所有的调用链都扒出来。
      * 约束：1. 必须在某个包的范围内
      * 约束：2. 如果已经找到mapper就返回
@@ -338,20 +360,21 @@ public class CallChainAnalyzer {
                 return chain.getCallChainList();
             }
         }
-
+        //处理递归调用问题，循环调用问题
+        if(methodInvokeTag.contains(serviceMethodKey)){
+            return chain.getCallChainList();
+        }
+        methodInvokeTag.add(serviceMethodKey);
         List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
-        log.debug("方法 {} 中有 {} 个方法调用", serviceMethodKey, serviceMethodCalls.size());
+        log.info("方法 {} 中有 {} 个方法调用", serviceMethodKey, serviceMethodCalls.size());
 
         for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
-            if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr serviceScope) {
-                String callerFieldName = serviceScope.getNameAsString();
+            {
                 String callerMethodName = serviceMethodCall.getNameAsString();
-                log.debug("callField:{}, callMethod:{}", callerFieldName, callerMethodName);
 
-                // 修复：使用正确的字段名来查找字段类型
-                String callerClassName = getFieldType(serviceClass, callerFieldName);
+                String callerClassName =getCalleeClassName(serviceClass,serviceMethodCall);
                 if (callerClassName == null || callerClassName.isEmpty()) {
-                    log.debug("无法解析字段类型: {} 在类 {}", callerFieldName, serviceClassName);
+                    log.debug("无法解析字段类型: {} 在类 {}", callerMethodName, serviceClassName);
                     continue;
                 }
 
@@ -361,7 +384,11 @@ public class CallChainAnalyzer {
                     log.debug("找不到被调用类: {}", callerClassName);
                     continue;
                 }
-
+                log.debug("callClass:{}, callMethod:{}", callerClassName, callerMethodName);
+                if(methodKey(callerClassName, callerMethodName).equals(serviceMethodKey)){
+                    //处理递归调用问题
+                    continue;
+                }
                 CallChain callerChain = new CallChain();
                 callerChain.setId(methodKey(callerClassName, callerMethodName));
                 callerChain.setEndpointId(methodKey(callerClassName, callerMethodName));
@@ -976,5 +1003,38 @@ public class CallChainAnalyzer {
         public String getParameterTypeFullName() {
             return parameterTypeFullName;
         }
+    }
+
+    /**
+     * 生成CSV文件
+     * @param controllers 接口列表
+     */
+    public void generateCsvFile(List<Endpoint> controllers) throws IOException {
+        // 生成带时间戳的文件名
+        String timestamp = DateUtils.now();
+        String fileName = "controllers_" + timestamp + ".csv";
+
+        // 构建CSV内容
+        StringBuilder csvContent = new StringBuilder();
+        // CSV头部
+        csvContent.append("ID,className,METHOD,callchain,score\n");
+
+        // 写入数据
+        for (Endpoint endpoint : controllers) {
+            csvContent.append(endpoint.getId()).append(",")
+                    .append(endpoint.getControllerName()).append(",")
+                    .append(endpoint.getMethodName()).append(",")
+                    .append(endpoint.getFlattenCallChain().size()).append(",")
+                    .append(endpoint.getSumAllComplexScore())
+                    .append("\n");
+        }
+
+        // 写入文件
+        java.nio.file.Files.write(
+                java.nio.file.Paths.get(fileName),
+                csvContent.toString().getBytes("UTF-8")
+        );
+
+        log.info("CSV文件已生成: {}", fileName);
     }
 }

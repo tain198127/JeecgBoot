@@ -97,6 +97,7 @@ class CallChainAnalyzerTest {
 //        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module");
         callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy");
         List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
+        callChainAnalyzer.generateCsvFile(controllers);
         assertNotNull(controllers);
         assertTrue(controllers.size()>0);
         controllers.forEach(item->{
@@ -109,7 +110,8 @@ class CallChainAnalyzerTest {
     void testBuildCallChain() throws IOException {
         // 创建模拟的Java文件和编译单元
         SrsInspectorConfig config = new SrsInspectorConfig();
-        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module"));
+//        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module"));
+        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-user-query/"));
         List<File> javaFiles = new ArrayList<>();
 
         for (String scanPath : config.getScanPaths()) {
@@ -118,11 +120,14 @@ class CallChainAnalyzerTest {
 
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);
-        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module/nc-issuance-book-dcm-service/src/main/resources/mybatis/mapper");
+//        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module/nc-issuance-book-dcm-service/src/main/resources/mybatis/mapper");
+        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-user-query/");
         Endpoint endpoint1 = new Endpoint();
 //        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.pricingplacing.PreGeneratePlacingResultController");
-        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.group.GroupStopGroupClickController");
-        endpoint1.setMethodName("doService");
+//        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.group.GroupStopGroupClickController");
+        endpoint1.setControllerName("cn.nc.user.cfaeacct.facade.controller.ClientCfaeAcctQueryListExportController");
+//        endpoint1.setMethodName("doService");
+        endpoint1.setMethodName("clientCfaeAcctQueryListExport");
         endpoint1.setId(endpoint1.getControllerName()+"#"+endpoint1.getMethodName());
         // Build the call chains for the endpoint
         List<Endpoint> endpoints = Collections.singletonList(endpoint1);
