@@ -10,6 +10,7 @@ import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclaration;
 import com.github.javaparser.resolution.types.ResolvedReferenceType;
+import com.jeecg.weibo.exception.BusinessException;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -224,7 +225,7 @@ public class CallChainAnalyzer {
                     }
                 } catch (Exception e) {
                     // 解析失败时忽略该接口，继续检查其他接口
-                    log.error("Failed to resolve extended type: " + extendedType.getNameAsString(),e);
+                    log.debug("Failed to resolve extended type: " + extendedType.getNameAsString(),e);
                 }
             }
 
@@ -328,8 +329,14 @@ public class CallChainAnalyzer {
                 .getMethodDeclaration();
         //找不到对应的方法，返回空列表而不是null
         if (serviceMethod == null) {
-            log.warn("找不到方法: {}", serviceMethodKey);
-            return chain.getCallChainList();
+            try {
+                throw new BusinessException("can not find the method " + serviceMethodKey);
+            }
+            catch (BusinessException be){
+                log.debug("找不到方法: {}", serviceMethodKey,be);
+            }finally {
+                return chain.getCallChainList();
+            }
         }
 
         List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
@@ -523,6 +530,10 @@ public class CallChainAnalyzer {
                                 log.warn("查找类:{}时，未找到对应的类", serviceClassName);
                                 continue;
                             }
+                            if(null == methodKey(serviceClassName, methodName)){
+                                log.warn("查找类:{}的{}方法时，未找到对应的方法", serviceClassName,methodName);
+                                continue;
+                            }
                             // 构建Service节点
                             CallChain serviceChain = new CallChain();
                             serviceChain.setId(methodKey(serviceClassName, methodName));
@@ -532,8 +543,8 @@ public class CallChainAnalyzer {
                             serviceChain.setClassName(serviceClassName);
                             serviceChain.setMethodName(methodName);
                             serviceChain.setDescription("Service方法");
-                            serviceChain.setClassComplexScore(Long.valueOf(classComplexMap.get(serviceClassName)));
-                            serviceChain.setMethodComplexScore(Long.valueOf(methodComplexMap.get(methodKey(serviceClassName, methodName))));
+                            serviceChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(serviceClassName)).orElse(0)));
+                            serviceChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(serviceClassName, methodName))).orElse(0)));
                             controllerChain.getCallChainList().add(serviceChain);
                             // 深度拷贝 CallChain 对象后再添加到 flatCallChain
                             CallChain flatServiceChain = deepCopyCallChain(serviceChain);

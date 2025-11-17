@@ -243,8 +243,8 @@ public class CodeMetricsComplexityCalculator {
         // return 语句（在某些度量标准中计算）
         @Override
         public void visit(ReturnStmt n, Integer depth) {
-            // 某些实现会为 return 增加复杂度
-            // addComplexity(depth);
+            // 某些实现会为 return 增加复杂度，必须在return中增加复杂度，这是表明代码是否已经写完
+             addComplexity(depth);
             super.visit(n, depth);
         }
 

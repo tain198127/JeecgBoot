@@ -84,7 +84,8 @@ class CallChainAnalyzerTest {
     @Test
     void testScanAll() throws IOException {
         SrsInspectorConfig config = new SrsInspectorConfig();
-        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module"));
+//        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module"));
+        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy"));
         List<File> javaFiles = new ArrayList<>();
 
         for (String scanPath : config.getScanPaths()) {
@@ -93,7 +94,8 @@ class CallChainAnalyzerTest {
 
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);
-        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module");
+//        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module");
+        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy");
         List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
         assertNotNull(controllers);
         assertTrue(controllers.size()>0);
