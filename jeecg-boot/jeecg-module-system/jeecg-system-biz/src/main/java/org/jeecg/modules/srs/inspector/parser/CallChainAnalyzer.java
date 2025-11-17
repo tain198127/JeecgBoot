@@ -10,10 +10,6 @@ import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclaration;
 import com.github.javaparser.resolution.types.ResolvedReferenceType;
-import com.github.javaparser.symbolsolver.JavaSymbolSolver;
-import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
-import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
-import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +26,6 @@ import org.springframework.stereotype.Component;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -49,6 +44,10 @@ public class CallChainAnalyzer {
 
     private static final AtomicBoolean isClassInit = new AtomicBoolean(false);
     private static final AtomicBoolean isMapperInit = new AtomicBoolean(false);
+    private static final String TARGET_INTERFACE = "com.baomidou.mybatisplus.core.mapper.BaseMapper";
+    private static final String METHOD_SPANNER = "#";
+    private static final String DOT = ".";
+
     /**
      * 存放判定为 MyBatis Mapper 的 XML 文件映射，key 为 mapper 的 namespace（对应 Java 接口全限定名），value 为对应的 XML 文件
      */
@@ -59,18 +58,9 @@ public class CallChainAnalyzer {
     private final Map<String, MapperMethodInfo> mapperMethodMap = new HashMap<>();
     private final CodeParser codeParser;
     private final Map<String, ClassOrInterfaceDeclaration> classMap;
-
     private final Map<String, ClzAndMethod> methodMap;
     private final Map<String, Integer> classComplexMap;
     private final Map<String, Integer> methodComplexMap;
-    @Data
-    @AllArgsConstructor
-    public static class ClzAndMethod{
-        private String methodKey;
-        private ClassOrInterfaceDeclaration classOrInterfaceDeclaration;
-        private MethodDeclaration methodDeclaration;
-        private Long methodComplexScore;
-    }
     // 解析 XML 文件
     Configuration mybatisConfiguration = new Configuration() {
         @Override
@@ -98,7 +88,7 @@ public class CallChainAnalyzer {
         this.classComplexMap = new HashMap();
         this.methodComplexMap = new HashMap<>();
     }
-    private static String methodSpaner = "#";
+
     /**
      * 跟idea的方法名对齐
      *
@@ -107,256 +97,44 @@ public class CallChainAnalyzer {
      * @return
      */
     public static String methodKey(String className, String methodName) {
-        return className + methodSpaner + methodName;
+        return className + METHOD_SPANNER + methodName;
     }
 
-    // 初始化符号解析器
-    static {
-//
-//        CombinedTypeSolver solver = new CombinedTypeSolver();
-//        solver.add(new ReflectionTypeSolver());
-//        solver.add(new JavaParserTypeSolver(Paths.get("src/main/java")));
-//
-//        JavaSymbolSolver symbolSolver = new JavaSymbolSolver(solver);
-//        com.github.javaparser.StaticJavaParser.getConfiguration().setSymbolResolver(symbolSolver);
-
-        // 对于 JavaParser 3.x 版本，符号解析器在解析时自动使用，无需手动设置
-        // 符号解析器会在需要时通过类型解析器自动工作
-    }
     /**
      * 将dotKey中最后一个"."替换为"#"
+     *
      * @param dotKey 输入的字符串，格式为 className.methodName
      * @return 替换后的字符串，格式为 className#methodName
      */
-    public static String processDotKey2SharpKey(String dotKey){
-        if(dotKey != null && dotKey.contains(".")){
+    public static String processDotKey2SharpKey(String dotKey) {
+        if (dotKey != null && dotKey.contains(".")) {
             int lastDotIndex = dotKey.lastIndexOf(".");
             return dotKey.substring(0, lastDotIndex) + "#" + dotKey.substring(lastDotIndex + 1);
         }
         return dotKey;
     }
 
-    public static String processSharpKey2DotKey(String mapperId){
-        if(mapperId.lastIndexOf("#") > 0){
-            mapperId.replace("#",".");
+    public static String processSharpKey2DotKey(String mapperId) {
+        if (mapperId.lastIndexOf(METHOD_SPANNER) > 0) {
+            mapperId.replace(METHOD_SPANNER, DOT);
         }
         return mapperId;
     }
 
     /**
-     * 初始化分析器，加载所有类和方法
-     *
-     * @param javaFiles Java文件列表
-     * @throws IOException IO异常
-     */
-    public void init(List<File> javaFiles) throws IOException {
-        if (isClassInit.compareAndSet(false, true)) {
-            // 获取所有文件的父目录路径（去重）
-            List<String> parentDirs = javaFiles.stream()
-                    .map(file -> file.getParentFile().getAbsolutePath())
-                    .distinct()
-                    .toList();
-            codeParser.init(parentDirs);
-            for (File file : javaFiles) {
-                CompilationUnit cu = codeParser.parseFile(file);
-
-                int complexLevel = CodeMetricsComplexityCalculator.calculateClassComplexity(cu);
-
-                // 遍历所有类和接口
-                cu.accept(new VoidVisitorAdapter<Void>() {
-                    @Override
-                    public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
-
-                        String className = cls.getFullyQualifiedName().orElse("");
-                        classMap.put(className, cls);
-                        classComplexMap.put(className, complexLevel);
-                        // 遍历所有方法
-                        for (MethodDeclaration method : cls.getMethods()) {
-
-                            String methodKey = methodKey(className, method.getNameAsString());
-                            int methodComplexLevel = CodeMetricsComplexityCalculator.calculateMethodComplexity(method);
-                            methodMap.put(methodKey, new ClzAndMethod(methodKey,cls,method, (long) methodComplexLevel));
-                            methodComplexMap.put(methodKey, methodComplexLevel);
-
-                        }
-
-                        super.visit(cls, arg);
-                    }
-                }, null);
-            }
-            if (log.isDebugEnabled()) {
-                classComplexMap.forEach((k, v) -> {
-                    log.debug("class:{},comples:{}", k, v);
-                });
-                methodComplexMap.forEach((k, v) -> {
-                    log.debug("method:{},complex:{}", k, v);
-                });
-            }
-        }
-
-
-    }
-
-    /**
-     * 递归调用，把所有的调用链都扒出来。
-     * 约束：1. 必须在某个包的范围内
-     * 约束：2. 如果已经找到mapper就返回
-     * 约束：3. 没有找到更多的chain
-     * 每增加一层，就要对上一层的
-     *
-     * @param chain
-     * @return
-     */
-    public List<CallChain> buildCallChainRecycle(CallChain chain, Set<CallChain> flatCallChain) {
-//        List<CallChain> result = new ArrayList<>();
-        // 查找Service方法调用的Mapper方法
-        String serviceClassName = chain.getClassName();
-        String methodName = chain.getMethodName();
-        String serviceMethodKey = methodKey(serviceClassName, methodName);
-        ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
-
-        // 找不到对应的类，返回空列表而不是null
-        if (serviceClass == null) {
-            log.debug("找不到类: {}", serviceClassName);
-            return chain.getCallChainList();
-        }
-        int clsType = getClassType(serviceClass);
-
-        boolean isMapper = CallChainConst.MAPPER == clsType;
-        //是mapper
-        if (isMapper) {
-            chain.setCallType(getClassType(serviceClass));
-            String sqlContent = findMapperXmlSql(serviceClassName, methodName);
-            chain.setSqlContent(sqlContent);
-            return chain.getCallChainList(); // 返回空列表而不是null
-        }
-
-        MethodDeclaration serviceMethod = Optional.ofNullable(methodMap.get(serviceMethodKey))
-                .orElse(new ClzAndMethod(serviceMethodKey,null,null,0L))
-                .getMethodDeclaration();
-        //找不到对应的方法，返回空列表而不是null
-        if (serviceMethod == null) {
-            log.warn("找不到方法: {}", serviceMethodKey);
-            return chain.getCallChainList();
-        }
-
-        List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
-        log.debug("方法 {} 中有 {} 个方法调用", serviceMethodKey, serviceMethodCalls.size());
-
-        for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
-            if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr serviceScope) {
-                String callerFieldName = serviceScope.getNameAsString();
-                String callerMethodName = serviceMethodCall.getNameAsString();
-                log.debug("callField:{}, callMethod:{}", callerFieldName, callerMethodName);
-
-                // 修复：使用正确的字段名来查找字段类型
-                String callerClassName = getFieldType(serviceClass, callerFieldName);
-                if (callerClassName == null || callerClassName.isEmpty()) {
-                    log.debug("无法解析字段类型: {} 在类 {}", callerFieldName, serviceClassName);
-                    continue;
-                }
-
-                // 检查被调用的类是否存在
-                ClassOrInterfaceDeclaration callerServiceClass = classMap.get(callerClassName);
-                if (callerServiceClass == null) {
-                    log.debug("找不到被调用类: {}", callerClassName);
-                    continue;
-                }
-
-                CallChain callerChain = new CallChain();
-                callerChain.setId(methodKey(callerClassName, callerMethodName));
-                callerChain.setEndpointId(methodKey(callerClassName, callerMethodName));
-                callerChain.setLevel(chain.getLevel() + 1);
-
-                // 判断被调用的是Service还是Mapper
-                int clzType = getClassType(callerServiceClass);
-                boolean isCallerMapper = CallChainConst.MAPPER == clzType;
-                callerChain.setCallType(clzType);
-                callerChain.setClassName(callerClassName);
-                callerChain.setMethodName(callerMethodName);
-                callerChain.setDescription(isCallerMapper ? "Mapper方法" : "Service方法");
-                callerChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(callerClassName)).orElse(0)));
-                callerChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(callerClassName, callerMethodName))).orElse(0)));
-                chain.getCallChainList().add(callerChain);
-                if(isCallerMapper){
-                    String sqlContent = findMapperXmlSql(callerClassName, callerMethodName);
-                    callerChain.setSqlContent(sqlContent);
-                }
-                // 深度拷贝 CallChain 对象后再添加到 flatCallChain
-                CallChain flatCallChainItem = deepCopyCallChain(callerChain);
-                flatCallChain.add(flatCallChainItem);
-
-                // 递归调用，但如果是Mapper就不再继续递归
-                if (!isCallerMapper) {
-                    List<CallChain> subCallChains = buildCallChainRecycle(callerChain, flatCallChain);
-                    if (subCallChains != null && !subCallChains.isEmpty()) {
-                        callerChain.getCallChainList().addAll(subCallChains);
-                        // 深度拷贝子调用链后再添加到 flatCallChain
-                        List<CallChain> flatSubCallChains = subCallChains.stream()
-                                .map(this::deepCopyCallChain)
-                                .collect(Collectors.toList());
-                        flatCallChain.addAll(flatSubCallChains);
-                    }
-                }
-            }
-        }
-        return chain.getCallChainList();
-    }
-
-    /**
-     * 判断这个类的类型
-     * @param clazz
-     * @return
-     */
-    public int getClassType(@NotNull ClassOrInterfaceDeclaration clazz) {
-        // 使用常量定义注解名称
-        final String REST_CONTROLLER = "RestController";
-        final String CONTROLLER = "Controller";
-        final String MAPPER = "Mapper";
-        final String SERVICE = "Service";
-        final String COMPONENT = "Component";
-        final String REPOSITORY = "Repository";
-
-        // 检查Controller
-        boolean isController = clazz.getAnnotations().stream()
-                .anyMatch(annotation -> annotation.getNameAsString().equals(REST_CONTROLLER)
-                        || annotation.getNameAsString().equals(CONTROLLER));
-        if(isController){
-            return CallChainConst.CONTROLLER;
-        }
-        // 检查Service（包括@Component和@Repository）
-        boolean isService = clazz.getAnnotations().stream()
-                .anyMatch(anno -> anno.getNameAsString().equals(SERVICE)
-                        || anno.getNameAsString().equals(COMPONENT)
-                        || anno.getNameAsString().equals(REPOSITORY));
-        if(isService){
-            return CallChainConst.SERVICE;
-        }
-        // 1. 检查是否有 @Mapper 注解
-        boolean hasMapperAnnotation = clazz.getAnnotations().stream()
-                .anyMatch(annotation -> annotation.getNameAsString().equals("Mapper"));
-
-        // 2. 检查是否直接或间接继承了 MyBatis 核心 Mapper 接口
-        boolean extendsMyBatisMapper = extendsInterfaceSimple(clazz,TARGET_INTERFACE);
-
-        if (hasMapperAnnotation || extendsMyBatisMapper) {
-            return CallChainConst.MAPPER;
-        }
-        return CallChainConst.OTHER;
-
-    }
-    /**
      * 检查类型是否是 MyBatis 核心 Mapper 接口
+     *
      * @param type 类型
      * @return 如果是 MyBatis 核心 Mapper 接口，返回 true；否则返回 false
      */
     private static boolean isMyBatisMapperType(ClassOrInterfaceType type) {
         String typeName = type.getNameAsString();
-        Optional<String> scope = type.getScope().map(scopeExpr -> scopeExpr.toString());
+//        Optional<String> scope = type.getScope().map(scopeExpr -> scopeExpr.toString());
 
         // 检查是否是 MyBatis-Plus 的 Mapper 接口
         return typeName.equals("BaseMapper");
     }
+
     public static boolean extendsInterfaceSimple(ClassOrInterfaceDeclaration declaration, String targetInterface) {
         if (declaration == null || targetInterface == null) {
             return false;
@@ -367,24 +145,24 @@ public class CallChainAnalyzer {
         }
 
         try {
-            boolean isInheritBaseMapper = declaration.getExtendedTypes().stream().anyMatch(item->isMyBatisMapperType(item));
-            if(!isInheritBaseMapper){
-                isInheritBaseMapper = extendsInterface(declaration,targetInterface);
+            boolean isInheritBaseMapper = declaration.getExtendedTypes().stream().anyMatch(item -> isMyBatisMapperType(item));
+            if (!isInheritBaseMapper) {
+                isInheritBaseMapper = extendsInterface(declaration, targetInterface);
             }
             return isInheritBaseMapper;
         } catch (Exception e) {
             // 解析失败时记录警告而不是错误，因为这在某些情况下是正常的
             String className = declaration.getFullyQualifiedName().orElse(declaration.getNameAsString());
             log.debug("Failed to resolve interface: {} when checking if it extends: {}, reason: {}",
-                     className, targetInterface, e.getMessage());
+                    className, targetInterface, e.getMessage());
             return false;
         }
     }
-    private static final String TARGET_INTERFACE = "com.baomidou.mybatisplus.core.mapper.BaseMapper";
+
     /**
      * 判断接口是否继承了指定的目标接口（支持多级继承）
      *
-     * @param declaration 要检查的接口声明
+     * @param declaration     要检查的接口声明
      * @param targetInterface 目标接口的全限定名，例如 "com.baomidou.mybatisplus.core.mapper.Mapper"
      * @return true 如果继承了目标接口，否则返回 false
      */
@@ -446,32 +224,235 @@ public class CallChainAnalyzer {
                     }
                 } catch (Exception e) {
                     // 解析失败时忽略该接口，继续检查其他接口
-                    System.err.println("Failed to resolve extended type: " + extendedType.getNameAsString());
+                    log.error("Failed to resolve extended type: " + extendedType.getNameAsString(),e);
                 }
             }
 
             return false;
 
         } catch (Exception e) {
-            log.error("Failed to resolve declaration",e);
+            log.error("Failed to resolve declaration", e);
             return false;
         }
     }
 
+    /**
+     * 初始化分析器，加载所有类和方法
+     *
+     * @param javaFiles Java文件列表
+     * @throws IOException IO异常
+     */
+    public void init(List<File> javaFiles) throws IOException {
+        if (isClassInit.compareAndSet(false, true)) {
+            // 获取所有文件的父目录路径（去重）
+            List<String> parentDirs = javaFiles.stream()
+                    .map(file -> file.getParentFile().getAbsolutePath())
+                    .distinct()
+                    .toList();
+            codeParser.init(parentDirs);
+            for (File file : javaFiles) {
+                CompilationUnit cu = codeParser.parseFile(file);
+
+                int complexLevel = CodeMetricsComplexityCalculator.calculateClassComplexity(cu);
+
+                // 遍历所有类和接口
+                cu.accept(new VoidVisitorAdapter<Void>() {
+                    @Override
+                    public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
+
+                        String className = cls.getFullyQualifiedName().orElse("");
+                        classMap.put(className, cls);
+                        classComplexMap.put(className, complexLevel);
+                        // 遍历所有方法
+                        for (MethodDeclaration method : cls.getMethods()) {
+
+                            String methodKey = methodKey(className, method.getNameAsString());
+                            int methodComplexLevel = CodeMetricsComplexityCalculator.calculateMethodComplexity(method);
+                            methodMap.put(methodKey, new ClzAndMethod(methodKey, cls, method, (long) methodComplexLevel));
+                            methodComplexMap.put(methodKey, methodComplexLevel);
+
+                        }
+
+                        super.visit(cls, arg);
+                    }
+                }, null);
+            }
+            if (log.isDebugEnabled()) {
+                classComplexMap.forEach((k, v) -> {
+                    log.debug("class:{},comples:{}", k, v);
+                });
+                methodComplexMap.forEach((k, v) -> {
+                    log.debug("method:{},complex:{}", k, v);
+                });
+            }
+        }
+
+
+    }
+
+    /**
+     * 递归调用，把所有的调用链都扒出来。
+     * 约束：1. 必须在某个包的范围内
+     * 约束：2. 如果已经找到mapper就返回
+     * 约束：3. 没有找到更多的chain
+     * 每增加一层，就要对上一层的
+     *
+     * @param chain
+     * @return
+     */
+    public List<CallChain> buildCallChainRecycle(CallChain chain, Set<CallChain> flatCallChain) {
+        // 查找Service方法调用的Mapper方法
+        String serviceClassName = chain.getClassName();
+        String methodName = chain.getMethodName();
+        String serviceMethodKey = methodKey(serviceClassName, methodName);
+        ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
+
+        // 找不到对应的类，返回空列表而不是null
+        if (serviceClass == null) {
+            log.debug("找不到类: {}", serviceClassName);
+            return chain.getCallChainList();
+        }
+        int clsType = getClassType(serviceClass);
+
+        boolean isMapper = CallChainConst.MAPPER == clsType;
+        //是mapper
+        if (isMapper) {
+            chain.setCallType(getClassType(serviceClass));
+            String sqlContent = findMapperXmlSql(serviceClassName, methodName);
+            chain.setSqlContent(sqlContent);
+            return chain.getCallChainList(); // 返回空列表而不是null
+        }
+
+        MethodDeclaration serviceMethod = Optional.ofNullable(methodMap.get(serviceMethodKey))
+                .orElse(new ClzAndMethod(serviceMethodKey, null, null, 0L))
+                .getMethodDeclaration();
+        //找不到对应的方法，返回空列表而不是null
+        if (serviceMethod == null) {
+            log.warn("找不到方法: {}", serviceMethodKey);
+            return chain.getCallChainList();
+        }
+
+        List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
+        log.debug("方法 {} 中有 {} 个方法调用", serviceMethodKey, serviceMethodCalls.size());
+
+        for (MethodCallExpr serviceMethodCall : serviceMethodCalls) {
+            if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr serviceScope) {
+                String callerFieldName = serviceScope.getNameAsString();
+                String callerMethodName = serviceMethodCall.getNameAsString();
+                log.debug("callField:{}, callMethod:{}", callerFieldName, callerMethodName);
+
+                // 修复：使用正确的字段名来查找字段类型
+                String callerClassName = getFieldType(serviceClass, callerFieldName);
+                if (callerClassName == null || callerClassName.isEmpty()) {
+                    log.debug("无法解析字段类型: {} 在类 {}", callerFieldName, serviceClassName);
+                    continue;
+                }
+
+                // 检查被调用的类是否存在
+                ClassOrInterfaceDeclaration callerServiceClass = classMap.get(callerClassName);
+                if (callerServiceClass == null) {
+                    log.debug("找不到被调用类: {}", callerClassName);
+                    continue;
+                }
+
+                CallChain callerChain = new CallChain();
+                callerChain.setId(methodKey(callerClassName, callerMethodName));
+                callerChain.setEndpointId(methodKey(callerClassName, callerMethodName));
+                callerChain.setLevel(chain.getLevel() + 1);
+
+                // 判断被调用的是Service还是Mapper
+                int clzType = getClassType(callerServiceClass);
+                boolean isCallerMapper = CallChainConst.MAPPER == clzType;
+                callerChain.setCallType(clzType);
+                callerChain.setClassName(callerClassName);
+                callerChain.setMethodName(callerMethodName);
+                callerChain.setDescription(isCallerMapper ? "Mapper方法" : "Service方法");
+                callerChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(callerClassName)).orElse(0)));
+                callerChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(callerClassName, callerMethodName))).orElse(0)));
+                chain.getCallChainList().add(callerChain);
+                if (isCallerMapper) {
+                    String sqlContent = findMapperXmlSql(callerClassName, callerMethodName);
+                    callerChain.setSqlContent(sqlContent);
+                }
+                // 深度拷贝 CallChain 对象后再添加到 flatCallChain
+                CallChain flatCallChainItem = deepCopyCallChain(callerChain);
+                flatCallChain.add(flatCallChainItem);
+
+                // 递归调用，但如果是Mapper就不再继续递归
+                if (!isCallerMapper) {
+                    List<CallChain> subCallChains = buildCallChainRecycle(callerChain, flatCallChain);
+                    if (subCallChains != null && !subCallChains.isEmpty()) {
+                        callerChain.getCallChainList().addAll(subCallChains);
+                        // 深度拷贝子调用链后再添加到 flatCallChain
+                        List<CallChain> flatSubCallChains = subCallChains.stream()
+                                .map(this::deepCopyCallChain)
+                                .collect(Collectors.toList());
+                        flatCallChain.addAll(flatSubCallChains);
+                    }
+                }
+            }
+        }
+        return chain.getCallChainList();
+    }
+
+    /**
+     * 判断这个类的类型
+     *
+     * @param clazz
+     * @return
+     */
+    public int getClassType(@NotNull ClassOrInterfaceDeclaration clazz) {
+        // 使用常量定义注解名称
+        final String REST_CONTROLLER = "RestController";
+        final String CONTROLLER = "Controller";
+        final String MAPPER = "Mapper";
+        final String SERVICE = "Service";
+        final String COMPONENT = "Component";
+        final String REPOSITORY = "Repository";
+
+        // 检查Controller
+        boolean isController = clazz.getAnnotations().stream()
+                .anyMatch(annotation -> annotation.getNameAsString().equals(REST_CONTROLLER)
+                        || annotation.getNameAsString().equals(CONTROLLER));
+        if (isController) {
+            return CallChainConst.CONTROLLER;
+        }
+        // 检查Service（包括@Component和@Repository）
+        boolean isService = clazz.getAnnotations().stream()
+                .anyMatch(anno -> anno.getNameAsString().equals(SERVICE)
+                        || anno.getNameAsString().equals(COMPONENT)
+                        || anno.getNameAsString().equals(REPOSITORY));
+        if (isService) {
+            return CallChainConst.SERVICE;
+        }
+        // 1. 检查是否有 @Mapper 注解
+        boolean hasMapperAnnotation = clazz.getAnnotations().stream()
+                .anyMatch(annotation -> annotation.getNameAsString().equals(MAPPER));
+
+        // 2. 检查是否直接或间接继承了 MyBatis 核心 Mapper 接口
+        boolean extendsMyBatisMapper = extendsInterfaceSimple(clazz, TARGET_INTERFACE);
+
+        if (hasMapperAnnotation || extendsMyBatisMapper) {
+            return CallChainConst.MAPPER;
+        }
+        return CallChainConst.OTHER;
+
+    }
 
     /**
      * 扫描所有的endpoint，并扫描对应的callchain
+     *
      * @return
      */
-    public List<Endpoint> scanAllEndpoint(){
-        List<ClassOrInterfaceDeclaration> clzList = classMap.values().stream().filter(item->
+    public List<Endpoint> scanAllEndpoint() {
+        List<ClassOrInterfaceDeclaration> clzList = classMap.values().stream().filter(item ->
                 getClassType(item) == CallChainConst.CONTROLLER
-                ).toList();
-        log.info("当前这个目录下，一共有【{}】个controller类",clzList.size());
-        List<ClzAndMethod> controllerMethod = methodMap.values().stream().filter(item->{
-            return clzList.stream().anyMatch(finder->
+        ).toList();
+        log.info("当前这个目录下，一共有【{}】个controller类", clzList.size());
+        List<ClzAndMethod> controllerMethod = methodMap.values().stream().filter(item -> {
+            return clzList.stream().anyMatch(finder ->
                     {
-                        if(item.getClassOrInterfaceDeclaration() == null){
+                        if (item.getClassOrInterfaceDeclaration() == null) {
                             return false;
                         }
                         return finder.getFullyQualifiedName()
@@ -479,17 +460,18 @@ public class CallChainAnalyzer {
                     }
             );
         }).toList();
-        log.info("当前这个目录下，一共有【{}】个controller 方法",controllerMethod.size());
-        List<Endpoint> controllers = controllerMethod.stream().map(item->{
+        log.info("当前这个目录下，一共有【{}】个controller 方法", controllerMethod.size());
+        List<Endpoint> controllers = controllerMethod.stream().map(item -> {
             Endpoint endpoint = new Endpoint();
             endpoint.setId(item.methodKey);
             endpoint.setMethodName(item.getMethodDeclaration().getNameAsString());
             endpoint.setControllerName(item.getClassOrInterfaceDeclaration().getFullyQualifiedName().get());
             return endpoint;
         }).toList();
-        controllers.forEach(item->buildCallChain(item,null));
+        controllers.forEach(item -> buildCallChain(item, null));
         return controllers;
     }
+
     /**
      * 构建接口的调用链
      *
@@ -537,8 +519,8 @@ public class CallChainAnalyzer {
                         // 查找字段对应的类型
                         String serviceClassName = getFieldType(controllerClass, fieldName);
                         if (!serviceClassName.isEmpty()) {
-                            if(classMap.get(serviceClassName) == null){
-                                log.warn("查找类:{}时，未找到对应的类",serviceClassName);
+                            if (classMap.get(serviceClassName) == null) {
+                                log.warn("查找类:{}时，未找到对应的类", serviceClassName);
                                 continue;
                             }
                             // 构建Service节点
@@ -567,12 +549,9 @@ public class CallChainAnalyzer {
             }
         }
         long allMethodComplexScore = 0;
-        for(CallChain cc : innerFlatCallChain){
+        for (CallChain cc : innerFlatCallChain) {
             allMethodComplexScore += cc.getMethodComplexScore();
         }
-//        long allMethodComplexScore = innerFlatCallChain.stream().filter(item -> item.getMethodComplexScore() != null)
-//                .map(item -> item.getMethodComplexScore())
-//                .reduce((a, b) -> a + b).get();
         endpoint.setSumAllComplexScore(allMethodComplexScore);
         endpoint.setCallChainList(callChains);
         endpoint.setFlattenCallChain(innerFlatCallChain);
@@ -637,8 +616,6 @@ public class CallChainAnalyzer {
                 String packageName = importDecl.getNameAsString();
                 List<String> typeNamelist = classMap.keySet().stream().filter(item -> item.contains(packageName) && item.endsWith(typeName)).toList();
 
-//                String fullName = packageName + "." + typeName;
-
                 // 检查类是否存在于通配符导入的包中
                 if (!typeNamelist.isEmpty()) {
                     String fullName = typeNamelist.get(0);
@@ -695,8 +672,6 @@ public class CallChainAnalyzer {
         return cls != null && cls.isInterface();
     }
 
-    // ====================== 以下为新增：Mapper 初始化与方法签名采集 ======================
-
     /**
      * 查找接口的实现类
      *
@@ -713,6 +688,8 @@ public class CallChainAnalyzer {
         }
         return "";
     }
+
+    // ====================== 以下为新增：Mapper 初始化与方法签名采集 ======================
 
     /**
      * 查找与 Mapper 类对应的 XML 文件中的 SQL 内容
@@ -741,14 +718,14 @@ public class CallChainAnalyzer {
             xmlMapperBuilder.parse();
 
             // 从 Configuration 中获取 MappedStatement
-            String statementId = mapperClassName+"."+methodName ;
+            String statementId = mapperClassName + "." + methodName;
 
             if (mybatisConfiguration.hasStatement(statementId)) {
 
                 return mybatisConfiguration.getMappedStatement(statementId).getBoundSql(null).getSql();
             }
         } catch (Exception e) {
-            log.debug("解析mybatis报错:{}.{}",mapperClassName,methodName,e);
+            log.debug("解析mybatis报错:{}.{}", mapperClassName, methodName, e);
         }
         return "";
     }
@@ -871,29 +848,29 @@ public class CallChainAnalyzer {
         }
     }
 
-    /**
-     * 将 parameterType 尽量解析为全限定名：
-     * - 若为已知别名（MyBatis 常见别名），映射为对应 Java 全名；
-     * - 若已是全限定名（包含'.'），原样返回；
-     * - 若为空或未知，返回原值（可能为空字符串）。
-     */
-    private String resolveParameterTypeFQN(String raw) {
-        if (raw == null || raw.isEmpty()) {
-            return "";
-        }
-        String t = raw.trim();
-        if (t.contains(".")) {
-            return t; // 认为已是全限定名
-        }
-        // MyBatis 常见内置别名映射（不区分大小写）
-        String k = t.toLowerCase(Locale.ROOT);
-        Map<String, String> alias = getMyBatisAliasMap();
-        if (alias.containsKey(k)) {
-            return alias.get(k);
-        }
-        // 兜底返回原值（无法解析）
-        return t;
-    }
+//    /**
+//     * 将 parameterType 尽量解析为全限定名：
+//     * - 若为已知别名（MyBatis 常见别名），映射为对应 Java 全名；
+//     * - 若已是全限定名（包含'.'），原样返回；
+//     * - 若为空或未知，返回原值（可能为空字符串）。
+//     */
+//    private String resolveParameterTypeFQN(String raw) {
+//        if (raw == null || raw.isEmpty()) {
+//            return "";
+//        }
+//        String t = raw.trim();
+//        if (t.contains(".")) {
+//            return t; // 认为已是全限定名
+//        }
+//        // MyBatis 常见内置别名映射（不区分大小写）
+//        String k = t.toLowerCase(Locale.ROOT);
+//        Map<String, String> alias = getMyBatisAliasMap();
+//        if (alias.containsKey(k)) {
+//            return alias.get(k);
+//        }
+//        // 兜底返回原值（无法解析）
+//        return t;
+//    }
 
     private Map<String, String> getMyBatisAliasMap() {
         Map<String, String> m = new HashMap<>();
@@ -951,15 +928,16 @@ public class CallChainAnalyzer {
         // 使用 Hutool BeanUtil 进行深度拷贝
         CallChain copy = BeanUtil.copyProperties(original, CallChain.class);
 
-//        // 深度拷贝 callChainList
-//        if (original.getCallChainList() != null && !original.getCallChainList().isEmpty()) {
-//            List<CallChain> copiedList = original.getCallChainList().stream()
-//                    .map(this::deepCopyCallChain)
-//                    .collect(Collectors.toList());
-//            copy.setCallChainList(copiedList);
-//        }
-
         return copy;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class ClzAndMethod {
+        private String methodKey;
+        private ClassOrInterfaceDeclaration classOrInterfaceDeclaration;
+        private MethodDeclaration methodDeclaration;
+        private Long methodComplexScore;
     }
 
     /**
