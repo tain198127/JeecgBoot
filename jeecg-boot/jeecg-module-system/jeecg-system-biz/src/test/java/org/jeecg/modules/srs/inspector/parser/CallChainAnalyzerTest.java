@@ -12,6 +12,7 @@ import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.google.common.collect.Lists;
+import io.github.cdimascio.dotenv.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.srs.inspector.config.SrsInspectorConfig;
 import org.jeecg.modules.srs.inspector.entity.CallChain;
@@ -48,44 +49,21 @@ class CallChainAnalyzerTest {
     private MethodDeclaration serviceMethod;
     private ClassOrInterfaceDeclaration mapperClass;
     private MethodDeclaration mapperMethod;
+    private String initPath;
+    private String controllername;
+    private String testMethod;
+    @BeforeEach
+    void setUp() {
+        Dotenv dotenv= Dotenv.load();
+        initPath = dotenv.get("initpath");
+        controllername = dotenv.get("controllername");
+        testMethod = dotenv.get("testMethod");
 
-//    @BeforeEach
-//    void setUp() {
-//        // 初始化测试接口信息
-//        endpoint = new Endpoint();
-//        endpoint.setId("test-endpoint-id");
-//        endpoint.setControllerName("com.example.controller.TestController");
-//        endpoint.setMethodName("testMethod");
-//
-//        // 创建模拟的Controller类
-//        controllerClass = mock(ClassOrInterfaceDeclaration.class);
-//        when(controllerClass.getFullyQualifiedName()).thenReturn(Optional.of("com.example.controller.TestController"));
-//
-//        // 创建模拟的Controller方法
-//        controllerMethod = mock(MethodDeclaration.class);
-//        when(controllerMethod.getNameAsString()).thenReturn("testMethod");
-//
-//        // 创建模拟的Service类
-//        serviceClass = mock(ClassOrInterfaceDeclaration.class);
-//        when(serviceClass.getFullyQualifiedName()).thenReturn(Optional.of("com.example.service.TestService"));
-//
-//        // 创建模拟的Service方法
-//        serviceMethod = mock(MethodDeclaration.class);
-//        when(serviceMethod.getNameAsString()).thenReturn("testServiceMethod");
-//
-//        // 创建模拟的Mapper类
-//        mapperClass = mock(ClassOrInterfaceDeclaration.class);
-//        when(mapperClass.getFullyQualifiedName()).thenReturn(Optional.of("com.example.mapper.TestMapper"));
-//
-//        // 创建模拟的Mapper方法
-//        mapperMethod = mock(MethodDeclaration.class);
-//        when(mapperMethod.getNameAsString()).thenReturn("testMapperMethod");
-//    }
+    }
     @Test
     void testScanAll() throws IOException {
         SrsInspectorConfig config = new SrsInspectorConfig();
-//        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module"));
-        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy"));
+        config.setScanPaths(ListUtil.of(initPath));
         List<File> javaFiles = new ArrayList<>();
 
         for (String scanPath : config.getScanPaths()) {
@@ -94,8 +72,7 @@ class CallChainAnalyzerTest {
 
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);
-//        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-issuance-book-dcm/nc-issuance-book-dcm-module");
-        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy");
+        callChainAnalyzer.initmapper(initPath);
         List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
         callChainAnalyzer.generateCsvFile(controllers);
         assertNotNull(controllers);
@@ -110,8 +87,8 @@ class CallChainAnalyzerTest {
     void testBuildCallChain() throws IOException {
         // 创建模拟的Java文件和编译单元
         SrsInspectorConfig config = new SrsInspectorConfig();
-//        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module"));
-        config.setScanPaths(ListUtil.of("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-user-query/"));
+
+        config.setScanPaths(ListUtil.of(initPath));
         List<File> javaFiles = new ArrayList<>();
 
         for (String scanPath : config.getScanPaths()) {
@@ -120,14 +97,12 @@ class CallChainAnalyzerTest {
 
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);
-//        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/old_source-2025-9-1/all/nc-issuance-book-dcm/nc-issuance-book-dcm-module/nc-issuance-book-dcm-service/src/main/resources/mybatis/mapper");
-        callChainAnalyzer.initmapper("/Users/baodan/develop/isoftstone/北金所债权管理系统/code/newcn/copy/nc-user-query/");
+        callChainAnalyzer.initmapper(initPath);
         Endpoint endpoint1 = new Endpoint();
-//        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.pricingplacing.PreGeneratePlacingResultController");
-//        endpoint1.setControllerName("cn.nc.issuance.book.dcm.facade.controller.group.GroupStopGroupClickController");
-        endpoint1.setControllerName("cn.nc.user.cfaeacct.facade.controller.ClientCfaeAcctQueryListExportController");
+
+        endpoint1.setControllerName(controllername);
 //        endpoint1.setMethodName("doService");
-        endpoint1.setMethodName("clientCfaeAcctQueryListExport");
+        endpoint1.setMethodName(testMethod);
         endpoint1.setId(endpoint1.getControllerName()+"#"+endpoint1.getMethodName());
         // Build the call chains for the endpoint
         List<Endpoint> endpoints = Collections.singletonList(endpoint1);
