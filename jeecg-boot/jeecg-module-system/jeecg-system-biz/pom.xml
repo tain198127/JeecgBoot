@@ -30,6 +30,42 @@
 			<artifactId>jeecg-boot-module-airag</artifactId>
 			<version>${jeecgboot.version}</version>
 		</dependency>
+		<!-- Spring Boot Web Starter -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		<!-- Apache PDFBox -->
+		<dependency>
+			<groupId>org.apache.pdfbox</groupId>
+			<artifactId>pdfbox</artifactId>
+			<version>2.0.32</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.pdfbox</groupId>
+			<artifactId>pdfbox-tools</artifactId>
+			<version>2.0.32</version>
+		</dependency>
+		<!-- 日志依赖 -->
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-api</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-log4j12</artifactId>
+			<version>1.7.36</version>
+		</dependency>
+		<!-- 工具类依赖 -->
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-lang3</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>commons-io</groupId>
+			<artifactId>commons-io</artifactId>
+			<version>2.11.0</version>
+		</dependency>
 		<!-- 企业微信/钉钉 api -->
 		<dependency>
 			<groupId>org.jeecgframework</groupId>
@@ -73,6 +109,22 @@
 			<artifactId>jeecg-boot-module-airag</artifactId>
 			<version>${jeecgboot.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>com.github.xiaoymin</groupId>
+			<artifactId>knife4j-openapi3-spring-boot-starter</artifactId>
+			<version>4.4.0</version>
+		</dependency>
+		<dependency>
+			<groupId>io.swagger</groupId>
+			<artifactId>swagger-codegen</artifactId>
+			<version>2.4.7</version>
+		</dependency>
+		<dependency>
+			<groupId>javax.servlet</groupId>
+			<artifactId>javax.servlet-api</artifactId>
+			<version>4.0.1</version>
+		</dependency>
+
 	</dependencies>
 	
 </project>

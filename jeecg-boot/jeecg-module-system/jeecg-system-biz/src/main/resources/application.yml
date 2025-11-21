@@ -1,0 +1,5 @@
+# PDF上传配置
+jeecg:
+  pdf:
+    upload:
+      path: /Users/baodan/develop/git/trae_demo/JeecgBoot/jeecg-boot/jeecg-module-system/jeecg-system-biz/src/main/resources/upload/pdf
