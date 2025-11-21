@@ -14,7 +14,6 @@ import com.jeecg.weibo.exception.BusinessException;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.calcite.util.DateTimeStringUtils;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.session.Configuration;
@@ -29,6 +28,7 @@ import org.springframework.stereotype.Component;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -229,7 +229,7 @@ public class CallChainAnalyzer {
                     }
                 } catch (Exception e) {
                     // 解析失败时忽略该接口，继续检查其他接口
-                    log.debug("Failed to resolve extended type: " + extendedType.getNameAsString(),e);
+                    log.debug("Failed to resolve extended type: " + extendedType.getNameAsString(), e);
                 }
             }
 
@@ -297,22 +297,23 @@ public class CallChainAnalyzer {
 
     /**
      * 获取被调用函数所在的类
+     *
      * @param serviceClass
      * @param serviceMethodCall
      * @return
      */
-    private String getCalleeClassName(ClassOrInterfaceDeclaration serviceClass,MethodCallExpr serviceMethodCall){
-        if( serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr serviceScope){
-            String callerFieldName  =serviceScope.getNameAsString();
+    private String getCalleeClassName(ClassOrInterfaceDeclaration serviceClass, MethodCallExpr serviceMethodCall) {
+        if (serviceMethodCall.getScope().isPresent() && serviceMethodCall.getScope().get() instanceof NameExpr serviceScope) {
+            String callerFieldName = serviceScope.getNameAsString();
             return getFieldType(serviceClass, callerFieldName);
 
-        }
-        else{
+        } else {
             return serviceClass.getFullyQualifiedName().get();
         }
 
 
     }
+
     /**
      * 递归调用，把所有的调用链都扒出来。
      * 约束：1. 必须在某个包的范围内
@@ -353,15 +354,14 @@ public class CallChainAnalyzer {
         if (serviceMethod == null) {
             try {
                 throw new BusinessException("can not find the method " + serviceMethodKey);
-            }
-            catch (BusinessException be){
-                log.debug("找不到方法: {}", serviceMethodKey,be);
-            }finally {
+            } catch (BusinessException be) {
+                log.debug("找不到方法: {}", serviceMethodKey, be);
+            } finally {
                 return chain.getCallChainList();
             }
         }
         //处理递归调用问题，循环调用问题
-        if(methodInvokeTag.contains(serviceMethodKey)){
+        if (methodInvokeTag.contains(serviceMethodKey)) {
             return chain.getCallChainList();
         }
         methodInvokeTag.add(serviceMethodKey);
@@ -372,7 +372,7 @@ public class CallChainAnalyzer {
             {
                 String callerMethodName = serviceMethodCall.getNameAsString();
 
-                String callerClassName =getCalleeClassName(serviceClass,serviceMethodCall);
+                String callerClassName = getCalleeClassName(serviceClass, serviceMethodCall);
                 if (callerClassName == null || callerClassName.isEmpty()) {
                     log.debug("无法解析字段类型: {} 在类 {}", callerMethodName, serviceClassName);
                     continue;
@@ -385,7 +385,7 @@ public class CallChainAnalyzer {
                     continue;
                 }
                 log.debug("callClass:{}, callMethod:{}", callerClassName, callerMethodName);
-                if(methodKey(callerClassName, callerMethodName).equals(serviceMethodKey)){
+                if (methodKey(callerClassName, callerMethodName).equals(serviceMethodKey)) {
                     //处理递归调用问题
                     continue;
                 }
@@ -557,8 +557,8 @@ public class CallChainAnalyzer {
                                 log.warn("查找类:{}时，未找到对应的类", serviceClassName);
                                 continue;
                             }
-                            if(null == methodKey(serviceClassName, methodName)){
-                                log.warn("查找类:{}的{}方法时，未找到对应的方法", serviceClassName,methodName);
+                            if (null == methodKey(serviceClassName, methodName)) {
+                                log.warn("查找类:{}的{}方法时，未找到对应的方法", serviceClassName, methodName);
                                 continue;
                             }
                             // 构建Service节点
@@ -969,6 +969,71 @@ public class CallChainAnalyzer {
         return copy;
     }
 
+    public void generateAllClasComplex() throws IOException {
+        // 生成带时间戳的文件名
+        String timestamp = DateUtils.formatDate(new Date(), "yyyy-MM-dd-HH-mm-ss");
+        String fileName = "classComplex" + timestamp + ".csv";
+
+
+        // 构建CSV内容
+        StringBuilder csvContent = new StringBuilder();
+        // CSV头部
+        csvContent.append("className,method,score\n");
+        for (String key : methodMap.keySet()) {
+            ClzAndMethod clzAndMethod = methodMap.get(key);
+            csvContent.append(clzAndMethod.getClassOrInterfaceDeclaration().getFullyQualifiedName().get()).append(",")
+                    .append(clzAndMethod.getMethodKey()).append(",")
+                    .append(clzAndMethod.getMethodComplexScore())
+                    .append("\n");
+        }
+
+
+        // 写入文件
+        java.nio.file.Files.write(
+                java.nio.file.Paths.get(fileName),
+                csvContent.toString().getBytes(StandardCharsets.UTF_8)
+        );
+
+        log.info("CSV文件已生成: {}", fileName);
+    }
+
+    /**
+     * 生成CSV文件
+     *
+     * @param controllers 接口列表
+     */
+    public void generateCsvFile(List<Endpoint> controllers) throws IOException {
+        // 生成带时间戳的文件名
+        String timestamp = DateUtils.formatDate(new Date(), "yyyy-MM-dd-HH-mm-ss");
+        String fileName = "controllers_" + timestamp + ".csv";
+
+
+        // 构建CSV内容
+        StringBuilder csvContent = new StringBuilder();
+        // CSV头部
+        csvContent.append("ID,className,METHOD,callchain,score\n");
+
+        // 写入数据
+        for (Endpoint endpoint : controllers) {
+            csvContent.append(endpoint.getId()).append(",")
+                    .append(endpoint.getControllerName()).append(",")
+                    .append(endpoint.getMethodName()).append(",")
+                    .append(endpoint.getFlattenCallChain().size()).append(",")
+                    .append(endpoint.getSumAllComplexScore())
+                    .append("\n");
+        }
+
+        // 写入文件
+        java.nio.file.Files.write(
+                java.nio.file.Paths.get(fileName),
+                csvContent.toString().getBytes(StandardCharsets.UTF_8)
+        );
+
+        log.info("CSV文件已生成: {}", fileName);
+
+
+    }
+
     @Data
     @AllArgsConstructor
     public static class ClzAndMethod {
@@ -1003,38 +1068,5 @@ public class CallChainAnalyzer {
         public String getParameterTypeFullName() {
             return parameterTypeFullName;
         }
-    }
-
-    /**
-     * 生成CSV文件
-     * @param controllers 接口列表
-     */
-    public void generateCsvFile(List<Endpoint> controllers) throws IOException {
-        // 生成带时间戳的文件名
-        String timestamp = DateUtils.now();
-        String fileName = "controllers_" + timestamp + ".csv";
-
-        // 构建CSV内容
-        StringBuilder csvContent = new StringBuilder();
-        // CSV头部
-        csvContent.append("ID,className,METHOD,callchain,score\n");
-
-        // 写入数据
-        for (Endpoint endpoint : controllers) {
-            csvContent.append(endpoint.getId()).append(",")
-                    .append(endpoint.getControllerName()).append(",")
-                    .append(endpoint.getMethodName()).append(",")
-                    .append(endpoint.getFlattenCallChain().size()).append(",")
-                    .append(endpoint.getSumAllComplexScore())
-                    .append("\n");
-        }
-
-        // 写入文件
-        java.nio.file.Files.write(
-                java.nio.file.Paths.get(fileName),
-                csvContent.toString().getBytes("UTF-8")
-        );
-
-        log.info("CSV文件已生成: {}", fileName);
     }
 }

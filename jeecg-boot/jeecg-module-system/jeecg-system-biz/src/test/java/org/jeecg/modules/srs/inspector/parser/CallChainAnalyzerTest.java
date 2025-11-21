@@ -75,6 +75,7 @@ class CallChainAnalyzerTest {
         callChainAnalyzer.initmapper(initPath);
         List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
         callChainAnalyzer.generateCsvFile(controllers);
+        callChainAnalyzer.generateAllClasComplex();
         assertNotNull(controllers);
         assertTrue(controllers.size()>0);
         controllers.forEach(item->{
