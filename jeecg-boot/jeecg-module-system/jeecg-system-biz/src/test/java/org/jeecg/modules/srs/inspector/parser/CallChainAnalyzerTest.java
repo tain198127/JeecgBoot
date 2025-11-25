@@ -69,6 +69,13 @@ class CallChainAnalyzerTest {
         for (String scanPath : config.getScanPaths()) {
             javaFiles.addAll(codeParser.scanJavaFiles(scanPath));
         }
+        Map<String,PomInfo> pomInfos =new HashMap<>();
+        for(String scanPath:config.getScanPaths()){
+            pomInfos.putAll(codeParser.scanAllPom(scanPath));
+        }
+        for(String key : pomInfos.keySet()){
+            log.info("pom地址:{},groupid:{},artificatid:{}",key,pomInfos.get(key).getGroupId(),pomInfos.get(key).getArtifactId());
+        }
 
         // Initialize the call chain analyzer
         callChainAnalyzer.init(javaFiles);

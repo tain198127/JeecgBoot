@@ -13,15 +13,20 @@ import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
+import org.apache.maven.model.Model;
+import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -55,6 +60,61 @@ public class CodeParser {
         StaticJavaParser.getConfiguration().setSymbolResolver(symbolSolver);
     }
 
+    /**
+     * 扫描指定目录下的所有 pom.xml 文件
+     *
+     * @param scanPath 扫描路径
+     * @return PomInfo 列表，包含 pom 对象、所在目录地址、artifactId、groupId 等信息
+     * @throws IOException IO异常
+     */
+    public Map<String,PomInfo> scanAllPom(String scanPath) throws IOException {
+        Map<String,PomInfo> pomInfoMap = new HashMap<>();
+        Path rootPath = Paths.get(scanPath);
+
+        if (!Files.exists(rootPath)) {
+            throw new IOException("扫描路径不存在: " + scanPath);
+        }
+
+        // 递归查找所有 pom.xml 文件
+        try (Stream<Path> paths = Files.walk(rootPath)) {
+            paths.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().equals("pom.xml"))
+                    .forEach(pomPath -> {
+                        try {
+                            // 解析 pom.xml
+                            Model model = parsePomFile(pomPath);
+                            if (model != null) {
+                                // 获取 pom 文件所在目录
+                                Path directory = pomPath.getParent();
+                                PomInfo pomInfo = new PomInfo(model, directory, pomPath);
+                                pomInfoMap.put(directory.toString(),pomInfo);
+
+                            }
+                        } catch (Exception e) {
+                            // 记录错误但继续处理其他文件
+                            System.err.println("解析 POM 文件失败: " + pomPath + ", 错误: " + e.getMessage());
+                        }
+                    });
+        }
+
+        return pomInfoMap;
+    }
+
+    /**
+     * 解析 pom.xml 文件
+     *
+     * @param pomPath pom.xml 文件路径
+     * @return Maven Model 对象
+     */
+    private Model parsePomFile(Path pomPath) {
+        try (FileReader reader = new FileReader(pomPath.toFile())) {
+            MavenXpp3Reader mavenReader = new MavenXpp3Reader();
+            return mavenReader.read(reader);
+        } catch (Exception e) {
+            System.err.println("读取 POM 文件失败: " + pomPath + ", 错误: " + e.getMessage());
+            return null;
+        }
+    }
     /**
      * 扫描指定目录下的所有Java文件
      *
