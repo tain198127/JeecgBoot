@@ -51,12 +51,8 @@ public class CallChainServiceImpl extends ServiceImpl<CallChainMapper, CallChain
      * 分析所有代码，并生成csv文件
      */
     public void scanAll() throws IOException {
-        List<File> javaFiles = new ArrayList<>();
-        for (String scanPath : config.getScanPaths()) {
-            javaFiles.addAll(codeParser.scanJavaFiles(scanPath));
-        }
         // Initialize the call chain analyzer
-        callChainAnalyzer.init(javaFiles);
+        callChainAnalyzer.init(config.getScanPaths());
         callChainAnalyzer.initmapper(config.getScanPaths().get(0));
         List<Endpoint> controllers = callChainAnalyzer.scanAllEndpoint();
         
@@ -106,14 +102,10 @@ public class CallChainServiceImpl extends ServiceImpl<CallChainMapper, CallChain
         }
 
         try {
-            // Scan Java files from the configured paths
-            List<File> javaFiles = new ArrayList<>();
-            for (String scanPath : config.getScanPaths()) {
-                javaFiles.addAll(codeParser.scanJavaFiles(scanPath));
-            }
+
 
             // Initialize the call chain analyzer
-            callChainAnalyzer.init(javaFiles);
+            callChainAnalyzer.init(config.getScanPaths());
 
             // Build the call chains for the endpoint
             List<Endpoint> endpoints = Collections.singletonList(endpoint);

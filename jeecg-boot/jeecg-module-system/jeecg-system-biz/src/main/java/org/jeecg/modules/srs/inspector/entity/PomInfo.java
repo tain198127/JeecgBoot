@@ -1,8 +1,12 @@
-package org.jeecg.modules.srs.inspector.parser;
+package org.jeecg.modules.srs.inspector.entity;
 
+import lombok.Data;
 import org.apache.maven.model.Model;
+import org.jeecg.modules.srs.inspector.parser.CallChainAnalyzer;
 
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * POM 信息封装类
@@ -11,6 +15,7 @@ import java.nio.file.Path;
  * @version V1.0
  * @since 2025-01-25
  */
+@Data
 public class PomInfo {
 
     /**
@@ -27,6 +32,12 @@ public class PomInfo {
      * POM 文件路径
      */
     private Path pomPath;
+
+    private Set<PackageInfo> packageInfoSet = new HashSet<>();
+
+    private Set<ClassInfo> classInfoSet = new HashSet<>();
+
+    private Set<CallChainAnalyzer.ClzAndMethod> methodInfoSet = new HashSet<>();
 
     public PomInfo(Model model, Path directory, Path pomPath) {
         this.model = model;
@@ -69,29 +80,7 @@ public class PomInfo {
         return null;
     }
 
-    public Model getModel() {
-        return model;
-    }
 
-    public void setModel(Model model) {
-        this.model = model;
-    }
-
-    public Path getDirectory() {
-        return directory;
-    }
-
-    public void setDirectory(Path directory) {
-        this.directory = directory;
-    }
-
-    public Path getPomPath() {
-        return pomPath;
-    }
-
-    public void setPomPath(Path pomPath) {
-        this.pomPath = pomPath;
-    }
 
     @Override
     public String toString() {

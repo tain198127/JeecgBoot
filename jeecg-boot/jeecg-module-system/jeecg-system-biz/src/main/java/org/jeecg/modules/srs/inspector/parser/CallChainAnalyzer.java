@@ -19,8 +19,7 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.type.TypeAliasRegistry;
 import org.jeecg.common.util.DateUtils;
-import org.jeecg.modules.srs.inspector.entity.CallChain;
-import org.jeecg.modules.srs.inspector.entity.Endpoint;
+import org.jeecg.modules.srs.inspector.entity.*;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -29,6 +28,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -65,6 +65,17 @@ public class CallChainAnalyzer {
     private final Map<String, Integer> classComplexMap;
     private final Map<String, Integer> methodComplexMap;
     private final Set<String> methodInvokeTag;
+    private final Map<String, PomInfo> pomInfos =new HashMap<>();
+
+    //reverse index 提速
+    private final Map<PackageInfo,PomInfo> reverseIndexOfPackage = new HashMap<>();
+
+    private final Map<ClassInfo, PackageInfo> reverseIndexOfClass2Pkg = new HashMap<>();
+    private final Map<ClassInfo, PomInfo> reverseIndexOfClass2Pom = new HashMap<>();
+
+    private final Map<CallChainAnalyzer.ClzAndMethod, ClassInfo> reverseIndexOfMethod2Clz = new HashMap<>();
+    private final Map<CallChainAnalyzer.ClzAndMethod, PackageInfo> reverseIndexOfMethod2Pkg = new HashMap<>();
+    private final Map<CallChainAnalyzer.ClzAndMethod, PomInfo> reverseIndexOfMethod2Pom = new HashMap<>();
     // 解析 XML 文件
     Configuration mybatisConfiguration = new Configuration() {
         @Override
@@ -242,13 +253,101 @@ public class CallChainAnalyzer {
     }
 
     /**
+     * 检查这个类属于哪个pom，补齐对应的package，class,methods
+     * @param cu
+     */
+    private void processPomAndClass(CompilationUnit cu,ClassOrInterfaceDeclaration cd,List<ClzAndMethod> clzAndMethodList){
+
+        if(cu.getStorage().isPresent()){
+            Path path = cu.getStorage().get().getDirectory();
+            String p = path.toString();
+            List<String> hintsPath = pomInfos.keySet().stream().filter(item->p.contains(item)).toList();
+            
+            // 找到最长的路径（离当前路径最近的）
+            String closestPath = hintsPath.stream()
+                    .max(Comparator.comparingInt(String::length))
+                    .orElse(null);
+            
+            if (closestPath != null) {
+                log.debug("找到离当前路径最近的pom路径: {}", closestPath);
+                // 这里可以继续处理closestPath，比如设置到对应的类信息中，找不到就退出
+                if(!pomInfos.containsKey(closestPath)){
+                    return;
+                }
+                PomInfo pomInfo = pomInfos.get(closestPath);
+                //处理package
+                String pkgName = cu.getPackageDeclaration().get().getNameAsString();
+                List<PackageInfo> pkgList = pomInfo.getPackageInfoSet().stream()
+                        .filter(item->item.getName().equals(pkgName))
+                        .toList();
+                PackageInfo packageInfo = null;
+                if(pkgList!= null && pkgList.size()>0){
+                    packageInfo = pkgList.get(0);
+                }else{
+                    packageInfo = new PackageInfo();
+                    packageInfo.setName(pkgName);
+                    pomInfo.getPackageInfoSet().add(packageInfo);
+                }
+                //处理class
+                ClassInfo classInfo = null;
+                List<ClassInfo> classInfoList = packageInfo.getClassInfoSet().stream()
+                        .filter(item->item.getName().equals(cd.getFullyQualifiedName().get()))
+                        .toList();
+                if(classInfoList!=null && classInfoList.size()>0){
+                    classInfo = classInfoList.get(0);
+                }else {
+                    classInfo = new ClassInfo();
+                    classInfo.setName(cd.getFullyQualifiedName().get());
+
+                }
+                packageInfo.getClassInfoSet().add(classInfo);
+                pomInfo.getClassInfoSet().add(classInfo);
+
+
+
+                pomInfo.getMethodInfoSet().addAll(clzAndMethodList);
+                packageInfo.getMethodInfoSet().addAll(clzAndMethodList);
+                classInfo.getMethodInfoSet().addAll(clzAndMethodList);
+
+                //构建缓存
+                reverseIndexOfPackage.put(packageInfo,pomInfo);
+
+                reverseIndexOfClass2Pkg.put(classInfo,packageInfo);
+                reverseIndexOfClass2Pom.put(classInfo,pomInfo);
+
+                ClassInfo finalClassInfo = classInfo;
+                PackageInfo finalPackageInfo = packageInfo;
+                clzAndMethodList.forEach(mtd->{
+                    reverseIndexOfMethod2Clz.put(mtd, finalClassInfo);
+                    reverseIndexOfMethod2Pkg.put(mtd, finalPackageInfo);
+                    reverseIndexOfMethod2Pom.put(mtd, pomInfo);
+                });
+            }
+
+
+        }
+    }
+
+
+    /**
      * 初始化分析器，加载所有类和方法
      *
-     * @param javaFiles Java文件列表
+     * @param codeBasePaths Java文件列表
      * @throws IOException IO异常
      */
-    public void init(List<File> javaFiles) throws IOException {
+    public void init(List<String> codeBasePaths) throws IOException {
         if (isClassInit.compareAndSet(false, true)) {
+
+            for(String scanPath:codeBasePaths){
+                pomInfos.putAll(codeParser.scanAllPom(scanPath));
+            }
+
+            List<File> javaFiles = new ArrayList<>();
+
+            for (String scanPath : codeBasePaths) {
+                javaFiles.addAll(codeParser.scanJavaFiles(scanPath));
+            }
+
             // 获取所有文件的父目录路径（去重）
             List<String> parentDirs = javaFiles.stream()
                     .map(file -> file.getParentFile().getAbsolutePath())
@@ -257,6 +356,7 @@ public class CallChainAnalyzer {
             codeParser.init(parentDirs);
             for (File file : javaFiles) {
                 CompilationUnit cu = codeParser.parseFile(file);
+                //判断属于哪个pom,以及package，以及class
 
                 int complexLevel = CodeMetricsComplexityCalculator.calculateClassComplexity(cu);
 
@@ -266,18 +366,24 @@ public class CallChainAnalyzer {
                     public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
 
                         String className = cls.getFullyQualifiedName().orElse("");
+
                         classMap.put(className, cls);
                         classComplexMap.put(className, complexLevel);
+                        List<ClzAndMethod> tmpClzList = new ArrayList<>();
                         // 遍历所有方法
                         for (MethodDeclaration method : cls.getMethods()) {
 
                             String methodKey = methodKey(className, method.getNameAsString());
                             int methodComplexLevel = CodeMetricsComplexityCalculator.calculateMethodComplexity(method);
-                            methodMap.put(methodKey, new ClzAndMethod(methodKey, cls, method, (long) methodComplexLevel));
+
+                            ClzAndMethod clzAndMethod =new ClzAndMethod(methodKey, cls, method, (long) methodComplexLevel);
+                            tmpClzList.add(clzAndMethod);
+                            methodMap.put(methodKey, clzAndMethod);
                             methodComplexMap.put(methodKey, methodComplexLevel);
 
-                        }
 
+                        }
+                        processPomAndClass(cu,cls,tmpClzList);
                         super.visit(cls, arg);
                     }
                 }, null);
@@ -978,10 +1084,16 @@ public class CallChainAnalyzer {
         // 构建CSV内容
         StringBuilder csvContent = new StringBuilder();
         // CSV头部
-        csvContent.append("className,method,score\n");
+        csvContent.append("group,project,package,className,method,score\n");
         for (String key : methodMap.keySet()) {
             ClzAndMethod clzAndMethod = methodMap.get(key);
-            csvContent.append(clzAndMethod.getClassOrInterfaceDeclaration().getFullyQualifiedName().get()).append(",")
+            String artifactId = reverseIndexOfMethod2Pom.containsKey(clzAndMethod)?reverseIndexOfMethod2Pom.get(clzAndMethod).getArtifactId():"";
+            String groupid = reverseIndexOfMethod2Pom.containsKey(clzAndMethod)?reverseIndexOfMethod2Pom.get(clzAndMethod).getGroupId():"";
+            String pkgName =reverseIndexOfMethod2Pkg.containsKey(clzAndMethod)? reverseIndexOfMethod2Pkg.get(clzAndMethod).getName():"";
+            csvContent.append(groupid).append(",")
+                    .append(artifactId).append(",")
+                    .append(pkgName).append(",")
+                    .append(clzAndMethod.getClassOrInterfaceDeclaration().getFullyQualifiedName().get()).append(",")
                     .append(clzAndMethod.getMethodKey()).append(",")
                     .append(clzAndMethod.getMethodComplexScore())
                     .append("\n");

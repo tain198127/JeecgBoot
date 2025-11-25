@@ -15,6 +15,7 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeS
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
+import org.jeecg.modules.srs.inspector.entity.PomInfo;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
@@ -67,7 +68,7 @@ public class CodeParser {
      * @return PomInfo 列表，包含 pom 对象、所在目录地址、artifactId、groupId 等信息
      * @throws IOException IO异常
      */
-    public Map<String,PomInfo> scanAllPom(String scanPath) throws IOException {
+    public Map<String, PomInfo> scanAllPom(String scanPath) throws IOException {
         Map<String,PomInfo> pomInfoMap = new HashMap<>();
         Path rootPath = Paths.get(scanPath);
 
