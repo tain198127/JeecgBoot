@@ -383,6 +383,7 @@ public class CallChainAnalyzer {
 
 
                         }
+                        //检查这个类属于哪个pom，补齐对应的package，class,methods
                         processPomAndClass(cu,cls,tmpClzList);
                         super.visit(cls, arg);
                     }
@@ -1084,9 +1085,16 @@ public class CallChainAnalyzer {
         // 构建CSV内容
         StringBuilder csvContent = new StringBuilder();
         // CSV头部
-        csvContent.append("group,project,package,className,method,score\n");
+        csvContent.append("group,project,package,className,methodtype,method,score\n");
         for (String key : methodMap.keySet()) {
             ClzAndMethod clzAndMethod = methodMap.get(key);
+            String methodType = "public";
+            if(clzAndMethod.getMethodDeclaration().isPublic()){
+                methodType="public";
+            }
+            else if(clzAndMethod.getMethodDeclaration().isPrivate()){
+                methodType="private";
+            }
             String artifactId = reverseIndexOfMethod2Pom.containsKey(clzAndMethod)?reverseIndexOfMethod2Pom.get(clzAndMethod).getArtifactId():"";
             String groupid = reverseIndexOfMethod2Pom.containsKey(clzAndMethod)?reverseIndexOfMethod2Pom.get(clzAndMethod).getGroupId():"";
             String pkgName =reverseIndexOfMethod2Pkg.containsKey(clzAndMethod)? reverseIndexOfMethod2Pkg.get(clzAndMethod).getName():"";
@@ -1094,6 +1102,7 @@ public class CallChainAnalyzer {
                     .append(artifactId).append(",")
                     .append(pkgName).append(",")
                     .append(clzAndMethod.getClassOrInterfaceDeclaration().getFullyQualifiedName().get()).append(",")
+                    .append(methodType).append(",")
                     .append(clzAndMethod.getMethodKey()).append(",")
                     .append(clzAndMethod.getMethodComplexScore())
                     .append("\n");
