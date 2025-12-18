@@ -115,6 +115,11 @@ class CallChainAnalyzerTest {
         // Build the call chains for the endpoint
         List<Endpoint> endpoints = Collections.singletonList(endpoint1);
         Set<CallChain> flatCallChain = new HashSet<>();
+        List<String> enumList = new ArrayList<>();
+        enumList.add("cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum");
+//        enumList.add("cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum");
+        enumList.add("cn.nc.user.enums.error.BussiContentFailEnum");
+        callChainAnalyzer.setTargetEnumTypes(enumList);
         List<CallChain> callChains = callChainAnalyzer.buildCallChain(endpoint1,flatCallChain);
         
         // 打印扁平化调用链
@@ -204,15 +209,28 @@ class CallChainAnalyzerTest {
             if (level > 0) {
                 indent += "--";
             }
-            
+            String enumVal = "";
+            if(!chain.getEnumUsages().isEmpty()){
+                for(String e: chain.getEnumUsages()){
+                    enumVal += e+";";
+                }
+            }
+            if(!enumVal.isEmpty()){
+                enumVal = "[enum:"+enumVal+"]";
+            }
             // 打印当前节点信息
-            String nodeInfo = String.format("%s[%s] %s.%s - %s (Level: %d)",
+            String nodeInfo = String.format("%s[%s] %s.%s %s (Level: %d)",
                     indent,
                     getCallTypeName(chain.getCallType()),
                     chain.getClassName(),
                     chain.getMethodName(),
-                    chain.getDescription(),
-                    chain.getLevel());
+
+                    enumVal,
+                    chain.getLevel()
+
+
+            );
+
             
             log.info(nodeInfo);
             

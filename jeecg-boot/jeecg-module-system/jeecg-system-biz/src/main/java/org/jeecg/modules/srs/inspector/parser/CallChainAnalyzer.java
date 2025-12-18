@@ -2,8 +2,11 @@ package org.jeecg.modules.srs.inspector.parser;
 
 import cn.hutool.core.bean.BeanUtil;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
@@ -76,6 +79,19 @@ public class CallChainAnalyzer {
     private final Map<CallChainAnalyzer.ClzAndMethod, ClassInfo> reverseIndexOfMethod2Clz = new HashMap<>();
     private final Map<CallChainAnalyzer.ClzAndMethod, PackageInfo> reverseIndexOfMethod2Pkg = new HashMap<>();
     private final Map<CallChainAnalyzer.ClzAndMethod, PomInfo> reverseIndexOfMethod2Pom = new HashMap<>();
+
+    /**
+     * 需要检测的枚举类型列表（全限定名）
+     * 例如: ["cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum", "cn.nc.issuance.book.dcm.lib.enums.StatusEnum"]
+     */
+    private Set<String> targetEnumTypes = new HashSet<>();
+
+    /**
+     * 枚举简单名到全限定名的映射，用于加速查找
+     * key: 简单类名（如 ErrorCodeEnum）, value: 全限定名（如 cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum）
+     */
+    private final Map<String, String> enumSimpleNameToFullName = new HashMap<>();
+
     // 解析 XML 文件
     Configuration mybatisConfiguration = new Configuration() {
         @Override
@@ -472,6 +488,14 @@ public class CallChainAnalyzer {
             return chain.getCallChainList();
         }
         methodInvokeTag.add(serviceMethodKey);
+
+        // 检测当前方法中使用的枚举值
+        Set<String> enumUsages = detectEnumUsages(serviceMethod, serviceClass);
+        if (!enumUsages.isEmpty()) {
+            chain.setEnumUsages(enumUsages);
+            log.debug("方法 {} 中检测到枚举使用: {}", serviceMethodKey, enumUsages);
+        }
+
         List<MethodCallExpr> serviceMethodCalls = codeParser.getMethodCalls(serviceMethod);
         log.info("方法 {} 中有 {} 个方法调用", serviceMethodKey, serviceMethodCalls.size());
 
@@ -668,6 +692,10 @@ public class CallChainAnalyzer {
                                 log.warn("查找类:{}的{}方法时，未找到对应的方法", serviceClassName, methodName);
                                 continue;
                             }
+                            ClassOrInterfaceDeclaration serviceClass = classMap.get(serviceClassName);
+                            MethodDeclaration serviceMethod = Optional.ofNullable(methodMap.get(methodKey(serviceClassName, methodName)))
+                                    .orElse(new ClzAndMethod(methodKey(serviceClassName, methodName), null, null, 0L))
+                                    .getMethodDeclaration();
                             // 构建Service节点
                             CallChain serviceChain = new CallChain();
                             serviceChain.setId(methodKey(serviceClassName, methodName));
@@ -679,6 +707,11 @@ public class CallChainAnalyzer {
                             serviceChain.setDescription("Service方法");
                             serviceChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(serviceClassName)).orElse(0)));
                             serviceChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(serviceClassName, methodName))).orElse(0)));
+                            Set<String> enumUsages = detectEnumUsages(serviceMethod, serviceClass);
+                            if (!enumUsages.isEmpty()) {
+                                serviceChain.setEnumUsages(enumUsages);
+                                log.debug("方法 {} 中检测到枚举使用: {}", methodKey(serviceClassName, methodName), enumUsages);
+                            }
                             controllerChain.getCallChainList().add(serviceChain);
                             // 深度拷贝 CallChain 对象后再添加到 flatCallChain
                             CallChain flatServiceChain = deepCopyCallChain(serviceChain);
@@ -817,6 +850,48 @@ public class CallChainAnalyzer {
         return cls != null && cls.isInterface();
     }
 
+    private boolean isSubTypeOf(ClassOrInterfaceDeclaration cls, String targetName) {
+        // 提取目标的简单名
+        String targetSimpleName = targetName.contains(".")
+                ? targetName.substring(targetName.lastIndexOf('.') + 1)
+                : targetName;
+
+        // 1. 检查直接实现的接口 (implements)
+        for (ClassOrInterfaceType implType : cls.getImplementedTypes()) {
+            if (matchTypeName(implType, targetName, targetSimpleName)) {
+                return true;
+            }
+        }
+
+        // 2. 检查直接继承的类/接口 (extends)
+        for (ClassOrInterfaceType extType : cls.getExtendedTypes()) {
+            if (matchTypeName(extType, targetName, targetSimpleName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean matchTypeName(ClassOrInterfaceType type, String fullName, String simpleName) {
+        String typeName = type.getNameAsString();
+
+        // 简单名匹配
+        if (typeName.equals(simpleName)) {
+            return true;
+        }
+
+        // 尝试解析全限定名
+        try {
+            String resolvedName = type.resolve().describe();
+            return resolvedName.equals(fullName);
+        } catch (Exception e) {
+            log.warn("resolve失败",e);
+            // 解析失败，只用简单名匹配
+            return false;
+        }
+    }
+
     /**
      * 查找接口的实现类
      *
@@ -826,12 +901,341 @@ public class CallChainAnalyzer {
     private String findImplementationClass(String interfaceName) {
         for (Map.Entry<String, ClassOrInterfaceDeclaration> entry : classMap.entrySet()) {
             ClassOrInterfaceDeclaration cls = entry.getValue();
-            if (!cls.isInterface() && cls.getImplementedTypes().stream()
-                    .anyMatch(type -> type.getNameAsString().equals(interfaceName.substring(interfaceName.lastIndexOf('.') + 1)))) {
-                return entry.getKey();
+            if(!cls.isInterface()){
+
+                boolean isSubType =isSubTypeOf(cls, interfaceName);
+                if(isSubType){
+                    return  entry.getKey();
+                }
+//                NodeList<ClassOrInterfaceType> implTest = cls.getImplementedTypes();
+//                for (ClassOrInterfaceType item:implTest){
+//                    if(item.getNameAsString().equals(interfaceName)){
+//                        String key = entry.getKey();
+//                        return key;
+//                    }
+//                }
             }
+//            if (!cls.isInterface() && cls.getImplementedTypes().stream()
+//                    .anyMatch(type -> type.getNameAsString().equals(interfaceName.substring(interfaceName.lastIndexOf('.') + 1)))) {
+//                return entry.getKey();
+//            }
         }
         return "";
+    }
+
+    // ====================== 以下为新增：枚举检测相关方法 ======================
+
+    /**
+     * 设置需要检测的枚举类型列表
+     *
+     * @param enumTypes 枚举类型全限定名列表，例如 ["cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum"]
+     */
+    public void setTargetEnumTypes(Collection<String> enumTypes) {
+        this.targetEnumTypes.clear();
+        this.enumSimpleNameToFullName.clear();
+
+        if (enumTypes != null) {
+            for (String enumType : enumTypes) {
+                if (enumType != null && !enumType.trim().isEmpty()) {
+                    String fullName = enumType.trim();
+                    this.targetEnumTypes.add(fullName);
+
+                    // 提取简单类名并建立映射
+                    int lastDot = fullName.lastIndexOf('.');
+                    String simpleName = lastDot > 0 ? fullName.substring(lastDot + 1) : fullName;
+                    this.enumSimpleNameToFullName.put(simpleName, fullName);
+                }
+            }
+        }
+        log.info("已设置 {} 个目标枚举类型进行检测: {}", targetEnumTypes.size(), targetEnumTypes);
+    }
+
+    /**
+     * 添加单个枚举类型到检测列表
+     *
+     * @param enumType 枚举类型全限定名
+     */
+    public void addTargetEnumType(String enumType) {
+        if (enumType != null && !enumType.trim().isEmpty()) {
+            String fullName = enumType.trim();
+            this.targetEnumTypes.add(fullName);
+
+            int lastDot = fullName.lastIndexOf('.');
+            String simpleName = lastDot > 0 ? fullName.substring(lastDot + 1) : fullName;
+            this.enumSimpleNameToFullName.put(simpleName, fullName);
+        }
+    }
+
+    /**
+     * 获取当前设置的目标枚举类型列表
+     *
+     * @return 枚举类型全限定名集合
+     */
+    public Set<String> getTargetEnumTypes() {
+        return Collections.unmodifiableSet(targetEnumTypes);
+    }
+    private String getEnumFullType(FieldAccessExpr expr){
+        try {
+            // 1. 获取作用域表达式
+            Expression scope = expr.getScope();
+
+            // 2. 解析作用域的类型
+            if (scope instanceof NameExpr) {
+                NameExpr nameExpr = (NameExpr) scope;
+                String scopeName = nameExpr.getNameAsString();
+
+                // 3. 检查是否是已知的枚举类型（从 targetEnumTypes 或 enumSimpleNameToFullName 中查找）
+                if (isTargetEnumType(scopeName)) {
+                    // 4. 可选：进一步验证字段名是否是枚举值
+                    String fieldName = expr.getNameAsString();
+                    String fullName = enumSimpleNameToFullName.get(scopeName);
+                    return fullName;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("解析 FieldAccessExpr 时出错: {}", e.getMessage());
+        }
+        return "";
+    }
+    /**
+     * 判断 FieldAccessExpr 的目标对象是否是枚举
+     * @param expr 字段访问表达式
+     * @return 如果是枚举访问，返回 true；否则返回 false
+     */
+    private boolean isEnumFieldAccess(FieldAccessExpr expr) {
+        try {
+            // 1. 获取作用域表达式
+            Expression scope = expr.getScope();
+
+            // 2. 解析作用域的类型
+            if (scope instanceof NameExpr) {
+                NameExpr nameExpr = (NameExpr) scope;
+                String scopeName = nameExpr.getNameAsString();
+
+                // 3. 检查是否是已知的枚举类型（从 targetEnumTypes 或 enumSimpleNameToFullName 中查找）
+                if (isTargetEnumType(scopeName)) {
+                    // 4. 可选：进一步验证字段名是否是枚举值
+                    String fieldName = expr.getNameAsString();
+                    return isValidEnumValue(scopeName, fieldName);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("解析 FieldAccessExpr 时出错: {}", e.getMessage());
+        }
+        return false;
+    }
+    /**
+     * 验证字段名是否是枚举值（可选）
+     * @param enumTypeName 枚举类型名（简单名或全限定名）
+     * @param fieldName 字段名
+     * @return 如果是有效的枚举值，返回 true
+     */
+    private boolean isValidEnumValue(String enumTypeName, String fieldName) {
+        // 这里可以根据需要实现，例如：
+        // 1. 通过反射加载枚举类并检查字段名是否存在
+        // 2. 或者通过静态分析（如解析枚举类的 AST）
+        // 当前简化处理：假设字段名是有效的
+        return true;
+    }
+    /**
+     * 检查类型是否是目标枚举类型
+     * @param typeName 类型名（可能是简单名或全限定名）
+     * @return 如果是目标枚举类型，返回 true
+     */
+    private boolean isTargetEnumType(String typeName) {
+        // 检查是否是全限定名
+        if (targetEnumTypes.contains(typeName)) {
+            return true;
+        }
+        // 检查是否是简单名（通过 enumSimpleNameToFullName 映射）
+        String fullName = enumSimpleNameToFullName.get(typeName);
+        return fullName != null && targetEnumTypes.contains(fullName);
+    }
+    /**
+     * 检测方法中使用的枚举值
+     * 会扫描方法体中所有形如 EnumClass.VALUE 的字段访问表达式
+     *
+     * @param method    方法声明
+     * @param cls       方法所属的类声明（用于解析导入语句）
+     * @return 检测到的枚举使用列表，格式为 "枚举全限定名.枚举值"
+     */
+    public Set<String> detectEnumUsages(MethodDeclaration method, ClassOrInterfaceDeclaration cls) {
+        Set<String> enumUsages = new HashSet<>();
+
+        if (method == null) {
+            log.debug("detectEnumUsages: method is null");
+            return enumUsages;
+        }
+
+        if (targetEnumTypes.isEmpty()) {
+            log.debug("detectEnumUsages: targetEnumTypes is empty, 请先调用 setTargetEnumTypes() 设置目标枚举列表");
+            return enumUsages;
+        }
+
+        log.debug("开始检测方法 {} 中的枚举使用, 目标枚举列表: {}", method.getNameAsString(), targetEnumTypes);
+
+        // 获取编译单元，用于解析导入语句
+        CompilationUnit cu = cls != null ? cls.findCompilationUnit().orElse(null) : null;
+
+        // 查找方法中所有的 FieldAccessExpr（字段访问表达式，如 ErrorCodeEnum.SUCCESS）
+        List<FieldAccessExpr> fieldAccessExprs = method.findAll(FieldAccessExpr.class);
+        log.debug("方法 {} 中找到 {} 个 FieldAccessExpr", method.getNameAsString(), fieldAccessExprs.size());
+
+        for (FieldAccessExpr fieldAccess : fieldAccessExprs) {
+            String enumFullName = null;
+            String enumValue = fieldAccess.getNameAsString();
+            String scopeStr = fieldAccess.getScope().toString();
+
+            log.info("检查 FieldAccessExpr: {}.{}", scopeStr, enumValue);
+
+            // 方式1: 尝试通过符号解析获取全限定名
+            try {
+                boolean isEnum = isEnumFieldAccess(fieldAccess);
+                if(isEnum){
+                    enumFullName =getEnumFullType(fieldAccess);
+//                    enumUsages.add(enumFullName);
+                    log.info("方式1匹配成功: {}", enumFullName);
+                }
+
+            } catch (Exception e) {
+                // 符号解析失败，使用备用方式
+                log.debug("符号解析失败: {}, 尝试简单名匹配", e.getMessage());
+            }
+
+            // 方式2: 如果符号解析失败，通过简单名匹配
+            if (enumFullName == null && fieldAccess.getScope() instanceof NameExpr nameExpr) {
+                String scopeName = nameExpr.getNameAsString();
+                log.debug("尝试简单名匹配, scopeName: {}, enumSimpleNameToFullName keys: {}",
+                        scopeName, enumSimpleNameToFullName.keySet());
+
+                // 检查是否在目标枚举简单名映射中
+                if (enumSimpleNameToFullName.containsKey(scopeName)) {
+                    // 进一步验证：检查导入语句
+                    String candidateFullName = enumSimpleNameToFullName.get(scopeName);
+                    log.debug("找到候选全限定名: {}", candidateFullName);
+
+                    if (cu != null) {
+                        boolean imported = isImported(cu, candidateFullName, scopeName);
+                        log.debug("导入检查结果: {}", imported);
+                        if (imported) {
+                            enumFullName = candidateFullName;
+//                            enumUsages.add(enumFullName);
+                        }
+                    } else {
+                        // 没有编译单元信息时，假设匹配
+                        enumFullName = candidateFullName;
+                        log.debug("无编译单元信息，假设匹配");
+                    }
+                }
+            }
+
+            // 方式3: 直接检查 scope 字符串是否包含目标枚举名（处理链式调用等复杂情况）
+            if (enumFullName == null) {
+                for (String targetEnum : targetEnumTypes) {
+                    String simpleEnumName = targetEnum.substring(targetEnum.lastIndexOf('.') + 1);
+                    if (scopeStr.equals(simpleEnumName) || scopeStr.endsWith("." + simpleEnumName)) {
+                        enumFullName = targetEnum;
+//                        enumUsages.add(enumFullName);
+                        log.debug("方式3匹配成功: scopeStr={}, targetEnum={}", scopeStr, targetEnum);
+                        break;
+                    }
+                }
+            }
+
+            // 如果找到匹配的枚举，记录使用
+            if (enumFullName != null) {
+                String usage = enumFullName + "." + enumValue;
+                if (!enumUsages.contains(usage)) {
+                    enumUsages.add(usage);
+                    log.info("检测到枚举使用: {}", usage);
+                }
+            }
+        }
+
+        // 方式4: 检查 NameExpr，处理静态导入的情况 (import static xxx.ErrorCodeEnum.*)
+        if (cu != null) {
+            List<NameExpr> nameExprs = method.findAll(NameExpr.class);
+            for (NameExpr nameExpr : nameExprs) {
+                String name = nameExpr.getNameAsString();
+                // 检查是否有静态导入
+                for (com.github.javaparser.ast.ImportDeclaration importDecl : cu.getImports()) {
+                    if (importDecl.isStatic()) {
+                        String importName = importDecl.getNameAsString();
+                        for (String targetEnum : targetEnumTypes) {
+                            // 检查是否是目标枚举的静态导入
+                            if (importName.equals(targetEnum) || importName.startsWith(targetEnum + ".")) {
+                                // 这个 name 可能是枚举值
+                                String usage = targetEnum + "." + name;
+                                if (!enumUsages.contains(usage)) {
+                                    enumUsages.add(usage);
+                                    log.info("检测到静态导入的枚举使用: {}", usage);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        log.debug("方法 {} 枚举检测完成, 共检测到 {} 个枚举使用", method.getNameAsString(), enumUsages.size());
+        return enumUsages;
+    }
+
+    /**
+     * 检查类型是否被导入
+     *
+     * @param cu            编译单元
+     * @param fullName      全限定名
+     * @param simpleName    简单类名
+     * @return 是否被导入
+     */
+    private boolean isImported(CompilationUnit cu, String fullName, String simpleName) {
+        log.debug("检查导入: fullName={}, simpleName={}", fullName, simpleName);
+
+        // 获取目标枚举的包名
+        String targetPackage = fullName.contains(".") ? fullName.substring(0, fullName.lastIndexOf('.')) : "";
+
+        // 检查明确导入
+        for (com.github.javaparser.ast.ImportDeclaration importDecl : cu.getImports()) {
+            String importName = importDecl.getNameAsString();
+            log.trace("检查导入语句: {}, isAsterisk={}, isStatic={}", importName, importDecl.isAsterisk(), importDecl.isStatic());
+
+            // 明确导入匹配
+            if (importName.equals(fullName)) {
+                log.debug("明确导入匹配: {}", importName);
+                return true;
+            }
+
+            // 通配符导入 (import xxx.*)
+            if (importDecl.isAsterisk() && !importDecl.isStatic()) {
+                String packageName = importDecl.getNameAsString();
+                if (packageName.equals(targetPackage)) {
+                    log.debug("通配符导入匹配: {} 包含 {}", packageName, simpleName);
+                    return true;
+                }
+            }
+
+            // 静态导入枚举类 (import static xxx.ErrorCodeEnum.*)
+            if (importDecl.isStatic() && importDecl.isAsterisk()) {
+                if (importName.equals(fullName)) {
+                    log.debug("静态通配符导入匹配: {}", importName);
+                    return true;
+                }
+            }
+        }
+
+        // 检查是否在同一个包中
+        String currentPackage = cu.getPackageDeclaration().map(pkg -> pkg.getNameAsString()).orElse("");
+        log.debug("当前包: {}, 目标包: {}", currentPackage, targetPackage);
+        if (!currentPackage.isEmpty() && currentPackage.equals(targetPackage)) {
+            log.debug("同包匹配: {}", currentPackage);
+            return true;
+        }
+
+        // 放宽匹配：如果简单名匹配，且没有其他同名类冲突，也认为匹配
+        // 这是为了处理一些边界情况
+        log.debug("导入检查未匹配");
+        return false;
     }
 
     // ====================== 以下为新增：Mapper 初始化与方法签名采集 ======================

@@ -8,9 +8,7 @@ import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 
 /**
  * 调用链实体
@@ -66,6 +64,11 @@ public class CallChain implements Serializable {
      * 调用链中如果是mapper的话，对应的sql内容
      */
     private String sqlContent;
+    /**
+     * 方法中使用的枚举值列表，格式为 "枚举类全限定名.枚举值"
+     * 例如: ["cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum.SUCCESS", "cn.nc.issuance.book.dcm.lib.enums.StatusEnum.ACTIVE"]
+     */
+    private Set<String> enumUsages = new HashSet<>();
     /**
      * 调用链
      */
