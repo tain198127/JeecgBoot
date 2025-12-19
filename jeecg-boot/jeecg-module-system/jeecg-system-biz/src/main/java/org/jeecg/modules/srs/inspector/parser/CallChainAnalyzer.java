@@ -905,7 +905,21 @@ public class CallChainAnalyzer {
 
         return false;
     }
+    private Map<String,List<String> > interfaceImpleclassCache = new HashMap<>();
 
+    /**
+     * 更新接口与实现类的缓存关系
+     * @param fullName
+     * @param cls
+     */
+    private void updateCache(String fullName, ClassOrInterfaceDeclaration cls){
+        if(!interfaceImpleclassCache.containsKey(fullName)){
+            List<String> implList = new ArrayList<>();
+            interfaceImpleclassCache.put(fullName,implList);
+        }
+        //更新缓存
+        interfaceImpleclassCache.get(fullName).add(cls.getFullyQualifiedName().get());
+    }
     /**
      * 判断类型引用是否匹配目标接口/类
      *
@@ -924,8 +938,28 @@ public class CallChainAnalyzer {
         }
         // 1. 首先尝试符号解析（最准确的方式）
         try {
-            String resolvedName = type.resolve().asReferenceType().getQualifiedName();
-            return resolvedName.equals(fullName);
+            String resolvedName;
+            //加缓存
+            if(interfaceImpleclassCache.containsKey(fullName)){
+                List<String> impleClassList = interfaceImpleclassCache.get(fullName);
+                if(impleClassList != null && impleClassList.size()>0){
+                    if(impleClassList.size()>1){
+                        log.warn("解析接口时，发现一个接口有多个实现类");
+                    }
+                    for(String implCls: impleClassList){
+                        if (implCls.equals(cls.getFullyQualifiedName())){
+                            return true;
+                        }
+                    }
+                }
+            }
+            resolvedName = type.resolve().asReferenceType().getQualifiedName();
+            if(resolvedName.equals(fullName)) {
+                updateCache(fullName,cls);
+                return true;
+            }
+            return  false;
+
         } catch (Exception e) {
             // 符号解析失败，使用备用方案
             log.debug("符号解析失败，使用备用匹配: {}", e.getMessage());
@@ -950,6 +984,7 @@ public class CallChainAnalyzer {
 
             // 明确导入匹配
             if (!importDecl.isAsterisk() && importName.equals(fullName)) {
+                updateCache(fullName,cls);
                 return true;
             }
 
@@ -960,6 +995,7 @@ public class CallChainAnalyzer {
 
             // 通配符导入
             if (importDecl.isAsterisk() && importName.equals(interfacePackage)) {
+                updateCache(fullName,cls);
                 return true;
             }
         }
@@ -969,6 +1005,7 @@ public class CallChainAnalyzer {
                 .map(p -> p.getNameAsString())
                 .orElse("");
         if (!currentPackage.isEmpty() && currentPackage.equals(interfacePackage)) {
+            updateCache(fullName,cls);
             return true;
         }
 
@@ -978,6 +1015,7 @@ public class CallChainAnalyzer {
             if (!currentPackage.isEmpty() && !interfacePackage.isEmpty()) {
                 // 同一项目内的类，包名可能有包含关系
                 if (currentPackage.startsWith(interfacePackage) || interfacePackage.startsWith(currentPackage)) {
+                    updateCache(fullName,cls);
                     return true;
                 }
             }
@@ -1199,7 +1237,9 @@ public class CallChainAnalyzer {
                 }
 
                 enumValueCache.put(cacheKey, valueInfo);
-                log.info("解析枚举值: {}", valueInfo);
+                if(log.isDebugEnabled()) {
+                    log.debug("解析枚举值: {}", valueInfo);
+                }
             }
 
         }
