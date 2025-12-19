@@ -859,14 +859,14 @@ public class CallChainAnalyzer {
 
         // 1. 检查直接实现的接口 (implements)
         for (ClassOrInterfaceType implType : cls.getImplementedTypes()) {
-            if (matchTypeName(implType, targetName, targetSimpleName)) {
+            if (matchTypeName(cls, implType, targetName, targetSimpleName)) {
                 return true;
             }
         }
 
         // 2. 检查直接继承的类/接口 (extends)
         for (ClassOrInterfaceType extType : cls.getExtendedTypes()) {
-            if (matchTypeName(extType, targetName, targetSimpleName)) {
+            if (matchTypeName(cls, extType, targetName, targetSimpleName)) {
                 return true;
             }
         }
@@ -874,35 +874,98 @@ public class CallChainAnalyzer {
         return false;
     }
 
-    private boolean matchTypeName(ClassOrInterfaceType type, String fullName, String simpleName) {
+    /**
+     * 判断类型引用是否匹配目标接口/类
+     *
+     * @param cls        待查的实现类
+     * @param type       待查的实现类实现的接口类型引用
+     * @param fullName   目标接口全限定名
+     * @param simpleName 目标接口简称
+     * @return 是否匹配
+     */
+    private boolean matchTypeName(ClassOrInterfaceDeclaration cls, ClassOrInterfaceType type,
+                                   String fullName, String simpleName) {
         String typeName = type.getNameAsString();
+        // 2. 简单名不匹配，直接返回 false
+        if (!typeName.equals(simpleName)) {
+            return false;
+        }
+        // 1. 首先尝试符号解析（最准确的方式）
+        try {
+            String resolvedName = type.resolve().asReferenceType().getQualifiedName();
+            return resolvedName.equals(fullName);
+        } catch (Exception e) {
+            // 符号解析失败，使用备用方案
+            log.debug("符号解析失败，使用备用匹配: {}", e.getMessage());
+        }
 
-        // 简单名匹配
-        if (typeName.equals(simpleName)) {
+
+
+        // 3. 简单名匹配，需要进一步验证是否是同一个类
+        CompilationUnit cu = cls.findCompilationUnit().orElse(null);
+        if (cu == null) {
+            // 无法获取编译单元，假设匹配（保守策略）
             return true;
         }
 
-        // 尝试解析全限定名
-        try {
-            String resolvedName = type.resolve().describe();
-            return resolvedName.equals(fullName);
-        } catch (Exception e) {
-            log.warn("resolve失败",e);
-            // 解析失败，只用简单名匹配
-            return false;
+        String interfacePackage = fullName.contains(".")
+                ? fullName.substring(0, fullName.lastIndexOf('.'))
+                : "";
+
+        // 4. 检查 import 语句
+        for (com.github.javaparser.ast.ImportDeclaration importDecl : cu.getImports()) {
+            String importName = importDecl.getNameAsString();
+
+            // 明确导入匹配
+            if (!importDecl.isAsterisk() && importName.equals(fullName)) {
+                return true;
+            }
+
+            // 明确导入了其他同名类，说明不匹配
+            if (!importDecl.isAsterisk() && importName.endsWith("." + simpleName) && !importName.equals(fullName)) {
+                return false;
+            }
+
+            // 通配符导入
+            if (importDecl.isAsterisk() && importName.equals(interfacePackage)) {
+                return true;
+            }
         }
+
+        // 5. 检查是否在同一个包中
+        String currentPackage = cu.getPackageDeclaration()
+                .map(p -> p.getNameAsString())
+                .orElse("");
+        if (!currentPackage.isEmpty() && currentPackage.equals(interfacePackage)) {
+            return true;
+        }
+
+        // 6. 如果目标类在 classMap 中，检查包路径关系
+        if (classMap.containsKey(fullName)) {
+            // 检查是否有父子包关系（更宽松的匹配）
+            if (!currentPackage.isEmpty() && !interfacePackage.isEmpty()) {
+                // 同一项目内的类，包名可能有包含关系
+                if (currentPackage.startsWith(interfacePackage) || interfacePackage.startsWith(currentPackage)) {
+                    return true;
+                }
+            }
+        }
+
+        // 默认不匹配
+        return false;
     }
 
     /**
-     * 查找接口的实现类
+     * 查找接口的实现类[核心方法]
      *
      * @param interfaceName 接口全限定名
      * @return 实现类的全限定名
      */
     private String findImplementationClass(String interfaceName) {
-
+        List<ClassOrInterfaceDeclaration> condidate = new ArrayList<>();
         for (Map.Entry<String, ClassOrInterfaceDeclaration> entry : classMap.entrySet()) {
             ClassOrInterfaceDeclaration cls = entry.getValue();
+
             if(!cls.isInterface()){
 
                 boolean isSubType =isSubTypeOf(cls, interfaceName);
