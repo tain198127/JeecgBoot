@@ -4,11 +4,15 @@ import cn.hutool.core.bean.BeanUtil;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.EnumConstantDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclaration;
@@ -67,6 +71,7 @@ public class CallChainAnalyzer {
     private final Map<String, MapperMethodInfo> mapperMethodMap = new HashMap<>();
     private final CodeParser codeParser;
     private final Map<String, ClassOrInterfaceDeclaration> classMap;
+    private final Map<String,EnumDeclaration> enumMap;
     private final Map<String, ClzAndMethod> methodMap;
     private final Map<String, Integer> classComplexMap;
     private final Map<String, Integer> methodComplexMap;
@@ -95,6 +100,19 @@ public class CallChainAnalyzer {
      */
     private final Map<String, String> enumSimpleNameToFullName = new HashMap<>();
 
+    /**
+     * 枚举值属性缓存
+     * key: 枚举全限定名.枚举值名称 (如 "cn.nc.enums.ErrorCodeEnum.SUCCESS")
+     * value: EnumValueInfo 包含该枚举值的所有属性
+     */
+    private final Map<String, EnumValueInfo> enumValueCache = new HashMap<>();
+
+    /**
+     * 枚举类的字段名列表缓存（按顺序）
+     * key: 枚举全限定名, value: 字段名列表（按声明顺序）
+     */
+    private final Map<String, List<String>> enumFieldNamesCache = new HashMap<>();
+
     // 解析 XML 文件
     Configuration mybatisConfiguration = new Configuration() {
         @Override
@@ -122,6 +140,7 @@ public class CallChainAnalyzer {
         this.classComplexMap = new HashMap();
         this.methodComplexMap = new HashMap<>();
         this.methodInvokeTag = new HashSet<>();
+        this.enumMap = new HashMap<>();
     }
 
     /**
@@ -379,6 +398,12 @@ public class CallChainAnalyzer {
                 // 遍历所有类和接口
                 cu.accept(new VoidVisitorAdapter<Void>() {
                     @Override
+                    public void visit(EnumDeclaration n, Void arg) {
+                        enumMap.put(n.getFullyQualifiedName().orElse(""),n);
+                        super.visit(n, arg);
+                    }
+
+                    @Override
                     public void visit(ClassOrInterfaceDeclaration cls, Void arg) {
 
                         String className = cls.getFullyQualifiedName().orElse("");
@@ -398,6 +423,13 @@ public class CallChainAnalyzer {
                             methodComplexMap.put(methodKey, methodComplexLevel);
 
 
+                        }
+                        //遍历类中的枚举
+                        CompilationUnit cu = cls.findCompilationUnit().orElse(null);
+                        // 查找 EnumDeclaration
+                        List<EnumDeclaration> enums = cu.findAll(EnumDeclaration.class);
+                        for(EnumDeclaration enu : enums){
+                            enumMap.put(enu.getFullyQualifiedName().orElse(""),enu);
                         }
                         //检查这个类属于哪个pom，补齐对应的package，class,methods
                         processPomAndClass(cu,cls,tmpClzList);
@@ -491,7 +523,7 @@ public class CallChainAnalyzer {
         methodInvokeTag.add(serviceMethodKey);
 
         // 检测当前方法中使用的枚举值
-        Set<String> enumUsages = detectEnumUsages(serviceMethod, serviceClass);
+        Map<String,EnumValueInfo> enumUsages = detectEnumUsages(serviceMethod, serviceClass);
         if (!enumUsages.isEmpty()) {
             chain.setEnumUsages(enumUsages);
             log.debug("方法 {} 中检测到枚举使用: {}", serviceMethodKey, enumUsages);
@@ -708,7 +740,7 @@ public class CallChainAnalyzer {
                             serviceChain.setDescription("Service方法");
                             serviceChain.setClassComplexScore(Long.valueOf(Optional.ofNullable(classComplexMap.get(serviceClassName)).orElse(0)));
                             serviceChain.setMethodComplexScore(Long.valueOf(Optional.ofNullable(methodComplexMap.get(methodKey(serviceClassName, methodName))).orElse(0)));
-                            Set<String> enumUsages = detectEnumUsages(serviceMethod, serviceClass);
+                            Map<String,EnumValueInfo> enumUsages = detectEnumUsages(serviceMethod, serviceClass);
                             if (!enumUsages.isEmpty()) {
                                 serviceChain.setEnumUsages(enumUsages);
                                 log.debug("方法 {} 中检测到枚举使用: {}", methodKey(serviceClassName, methodName), enumUsages);
@@ -1116,6 +1148,114 @@ public class CallChainAnalyzer {
         String fullName = enumSimpleNameToFullName.get(typeName);
         return fullName != null && targetEnumTypes.contains(fullName);
     }
+
+    /**
+     * 解析枚举类的源码，提取所有枚举值及其属性
+     * 支持形如:
+     * public enum ErrorCodeEnum {
+     *     SUCCESS("成功", "0000"),
+     *     FAIL("失败", "9999");
+     *     private String name;
+     *     private String code;
+     * }
+     *
+     * @param enumFullName 枚举全限定名
+     */
+    public void parseEnumClass(String enumFullName) {
+        // 检查是否已经解析过
+        if (enumFieldNamesCache.containsKey(enumFullName)) {
+            return;
+        }
+        for(Map.Entry<String, EnumDeclaration> entry:enumMap.entrySet()){
+            if(!entry.getKey().equals(enumFullName)){
+                continue;
+            }
+            // 找到目标枚举，解析字段名列表（按声明顺序）
+            List<String> fieldNames = new ArrayList<>();
+            for (FieldDeclaration field : entry.getValue().getFields()) {
+                field.getVariables().forEach(var -> fieldNames.add(var.getNameAsString()));
+            }
+            enumFieldNamesCache.put(enumFullName, fieldNames);
+            log.info("枚举 {} 的字段列表: {}", enumFullName, fieldNames);
+
+            // 解析每个枚举常量
+            for (EnumConstantDeclaration constant : entry.getValue().getEntries()) {
+                String valueName = constant.getNameAsString();
+                String cacheKey = enumFullName + "." + valueName;
+
+                EnumValueInfo valueInfo = new EnumValueInfo(enumFullName, valueName);
+
+                // 获取构造函数参数
+                NodeList<Expression> args = constant.getArguments();
+                for (int i = 0; i < args.size(); i++) {
+                    Expression arg = args.get(i);
+                    String argValue = extractExpressionValue(arg);
+                    valueInfo.getConstructorArgs().add(argValue);
+
+                    // 如果有对应的字段名，建立映射
+                    if (i < fieldNames.size()) {
+                        valueInfo.setProperty(fieldNames.get(i), argValue);
+                    }
+                }
+
+                enumValueCache.put(cacheKey, valueInfo);
+                log.info("解析枚举值: {}", valueInfo);
+            }
+
+        }
+        log.warn("未找到枚举类: {}", enumFullName);
+    }
+
+    /**
+     * 从表达式中提取值（字符串字面量、数字等）
+     */
+    private String extractExpressionValue(Expression expr) {
+        if (expr instanceof StringLiteralExpr) {
+            return ((StringLiteralExpr) expr).getValue();
+        } else if (expr.isIntegerLiteralExpr()) {
+            return expr.asIntegerLiteralExpr().getValue();
+        } else if (expr.isLongLiteralExpr()) {
+            return expr.asLongLiteralExpr().getValue();
+        } else if (expr.isBooleanLiteralExpr()) {
+            return String.valueOf(expr.asBooleanLiteralExpr().getValue());
+        } else if (expr.isDoubleLiteralExpr()) {
+            return expr.asDoubleLiteralExpr().getValue();
+        } else if (expr.isNullLiteralExpr()) {
+            return "null";
+        } else {
+            // 其他类型返回表达式的字符串形式
+            return expr.toString();
+        }
+    }
+
+    /**
+     * 获取枚举值的属性信息
+     *
+     * @param enumFullName 枚举全限定名
+     * @param valueName    枚举值名称
+     * @return EnumValueInfo，如果未找到返回 null
+     */
+    public EnumValueInfo getEnumValueInfo(String enumFullName, String valueName) {
+        // 先尝试解析枚举类
+        parseEnumClass(enumFullName);
+
+        String cacheKey = enumFullName + "." + valueName;
+        return enumValueCache.get(cacheKey);
+    }
+
+    /**
+     * 获取枚举值的指定属性
+     *
+     * @param enumFullName 枚举全限定名
+     * @param valueName    枚举值名称
+     * @param propertyName 属性名（如 name, code）
+     * @return 属性值，如果未找到返回 null
+     */
+    public String getEnumProperty(String enumFullName, String valueName, String propertyName) {
+        EnumValueInfo info = getEnumValueInfo(enumFullName, valueName);
+        return info != null ? info.getProperty(propertyName) : null;
+    }
+
     /**
      * 检测方法中使用的枚举值
      * 会扫描方法体中所有形如 EnumClass.VALUE 的字段访问表达式
@@ -1124,17 +1264,17 @@ public class CallChainAnalyzer {
      * @param cls       方法所属的类声明（用于解析导入语句）
      * @return 检测到的枚举使用列表，格式为 "枚举全限定名.枚举值"
      */
-    public Set<String> detectEnumUsages(MethodDeclaration method, ClassOrInterfaceDeclaration cls) {
+    public Map<String,EnumValueInfo> detectEnumUsages(MethodDeclaration method, ClassOrInterfaceDeclaration cls) {
         Set<String> enumUsages = new HashSet<>();
-
+        Map<String,EnumValueInfo> enumValueInfoMap = new HashMap<>();
         if (method == null) {
             log.debug("detectEnumUsages: method is null");
-            return enumUsages;
+            return enumValueInfoMap;
         }
 
         if (targetEnumTypes.isEmpty()) {
             log.debug("detectEnumUsages: targetEnumTypes is empty, 请先调用 setTargetEnumTypes() 设置目标枚举列表");
-            return enumUsages;
+            return enumValueInfoMap;
         }
 
         log.debug("开始检测方法 {} 中的枚举使用, 目标枚举列表: {}", method.getNameAsString(), targetEnumTypes);
@@ -1207,12 +1347,19 @@ public class CallChainAnalyzer {
                 }
             }
 
-            // 如果找到匹配的枚举，记录使用
+            // 如果找到匹配的枚举，记录使用并打印属性
             if (enumFullName != null) {
                 String usage = enumFullName + "." + enumValue;
                 if (!enumUsages.contains(usage)) {
                     enumUsages.add(usage);
-                    log.info("检测到枚举使用: {}", usage);
+                    // 获取并打印枚举值的属性
+                    EnumValueInfo valueInfo = getEnumValueInfo(enumFullName, enumValue);
+                    enumValueInfoMap.put(usage,valueInfo);
+                    if (valueInfo != null && !valueInfo.getProperties().isEmpty()) {
+                        log.info("检测到枚举使用: {} -> 属性: {}", usage, valueInfo.getProperties());
+                    } else {
+                        log.info("检测到枚举使用: {}", usage);
+                    }
                 }
             }
         }
@@ -1233,7 +1380,14 @@ public class CallChainAnalyzer {
                                 String usage = targetEnum + "." + name;
                                 if (!enumUsages.contains(usage)) {
                                     enumUsages.add(usage);
-                                    log.info("检测到静态导入的枚举使用: {}", usage);
+                                    // 获取并打印枚举值的属性
+                                    EnumValueInfo valueInfo = getEnumValueInfo(targetEnum, name);
+                                    enumValueInfoMap.put(usage,valueInfo);
+                                    if (valueInfo != null && !valueInfo.getProperties().isEmpty()) {
+                                        log.info("检测到静态导入的枚举使用: {} -> 属性: {}", usage, valueInfo.getProperties());
+                                    } else {
+                                        log.info("检测到静态导入的枚举使用: {}", usage);
+                                    }
                                 }
                             }
                         }
@@ -1243,7 +1397,36 @@ public class CallChainAnalyzer {
         }
 
         log.debug("方法 {} 枚举检测完成, 共检测到 {} 个枚举使用", method.getNameAsString(), enumUsages.size());
-        return enumUsages;
+        return enumValueInfoMap;
+    }
+
+    /**
+     * 检测方法中使用的枚举值，并返回详细的枚举属性信息
+     *
+     * @param method 方法声明
+     * @param cls    方法所属的类声明
+     * @return 枚举使用详情列表，包含每个枚举值的属性
+     */
+    public List<EnumValueInfo> detectEnumUsagesWithDetails(MethodDeclaration method, ClassOrInterfaceDeclaration cls) {
+        Map<String,EnumValueInfo> usages = detectEnumUsages(method, cls);
+        List<EnumValueInfo> details = new ArrayList<>();
+
+        for (String usage : usages.keySet()) {
+            // usage 格式: "枚举全限定名.枚举值名称"
+            int lastDot = usage.lastIndexOf('.');
+            if (lastDot > 0) {
+                String enumFullName = usage.substring(0, lastDot);
+                String valueName = usage.substring(lastDot + 1);
+                EnumValueInfo info = getEnumValueInfo(enumFullName, valueName);
+                if (info != null) {
+                    details.add(info);
+                } else {
+                    // 即使没有解析到属性，也创建一个基本的 EnumValueInfo
+                    details.add(new EnumValueInfo(enumFullName, valueName));
+                }
+            }
+        }
+        return details;
     }
 
     /**

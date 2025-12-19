@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
+import org.jeecg.modules.srs.inspector.parser.CallChainAnalyzer;
 
 import java.io.Serializable;
 import java.util.*;
@@ -68,7 +69,7 @@ public class CallChain implements Serializable {
      * 方法中使用的枚举值列表，格式为 "枚举类全限定名.枚举值"
      * 例如: ["cn.nc.issuance.book.dcm.lib.enums.ErrorCodeEnum.SUCCESS", "cn.nc.issuance.book.dcm.lib.enums.StatusEnum.ACTIVE"]
      */
-    private Set<String> enumUsages = new HashSet<>();
+    private Map<String, EnumValueInfo> enumUsages = new HashMap<>();
     /**
      * 调用链
      */

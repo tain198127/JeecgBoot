@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.srs.inspector.config.SrsInspectorConfig;
 import org.jeecg.modules.srs.inspector.entity.CallChain;
 import org.jeecg.modules.srs.inspector.entity.Endpoint;
+import org.jeecg.modules.srs.inspector.entity.EnumValueInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -211,8 +212,9 @@ class CallChainAnalyzerTest {
             }
             String enumVal = "";
             if(!chain.getEnumUsages().isEmpty()){
-                for(String e: chain.getEnumUsages()){
-                    enumVal += e+";";
+                for(String e: chain.getEnumUsages().keySet()){
+                    EnumValueInfo enumValueInfo = chain.getEnumUsages().get(e);
+                    enumVal += enumValueInfo.toString()+";";
                 }
             }
             if(!enumVal.isEmpty()){
