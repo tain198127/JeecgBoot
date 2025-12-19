@@ -1,5 +1,6 @@
 package org.jeecg.modules.srs.inspector.parser;
 
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -13,6 +14,7 @@ import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
 import org.jeecg.modules.srs.inspector.entity.PomInfo;
@@ -38,27 +40,58 @@ import java.util.stream.Stream;
  * @since 2025-01-01
  */
 @Component
+@Slf4j
 public class CodeParser {
 
     private TypeSolver typeSolver;
 
+    /**
+     * 找到codeBasePaths目录下，所有的src/main/java目录
+     * @param codeBasePaths
+     * @return
+     */
+    private List<String> scanAllSrcDir(List<String> codeBasePaths)
+    {
+        List<String> srcDirs = new ArrayList<>();
+
+        for (String basePath : codeBasePaths) {
+            Path path = Paths.get(basePath);
+
+            try (Stream<Path> paths = Files.walk(path)) {
+                paths.filter(Files::isDirectory)
+                        .filter(p -> p.toString().endsWith("src/main/java"))
+                        .filter(p -> Files.exists(p) && Files.isDirectory(p))
+                        .forEach(p -> srcDirs.add(p.toString()));
+            } catch (IOException e) {
+                log.warn("扫描路径 {} 时发生异常: {}", basePath, e.getMessage());
+            }
+        }
+
+        log.info("找到 {} 个 src/main/java 目录", srcDirs.size());
+        return srcDirs;
+    }
     /**
      * 初始化解析器
      *
      * @param sourcePaths 源代码路径列表
      */
     public void init(List<String> sourcePaths) {
+        // 获取所有文件的父目录路径（去重）
+        List<String> parentDirs = scanAllSrcDir(sourcePaths);
         CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
+        //添加
         combinedTypeSolver.add(new ReflectionTypeSolver());
 
         // 添加源代码路径
-        for (String path : sourcePaths) {
-            combinedTypeSolver.add(new JavaParserTypeSolver(new File(path)));
+        for (String path : parentDirs) {
+            combinedTypeSolver.add(new JavaParserTypeSolver(Path.of(path)));
         }
 
         typeSolver = combinedTypeSolver;
         JavaSymbolSolver symbolSolver = new JavaSymbolSolver(typeSolver);
-        StaticJavaParser.getConfiguration().setSymbolResolver(symbolSolver);
+        ParserConfiguration cfg = new ParserConfiguration()
+                .setSymbolResolver(symbolSolver);
+        StaticJavaParser.setConfiguration(cfg);
     }
 
     /**

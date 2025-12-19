@@ -31,10 +31,13 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 
 /**
@@ -345,6 +348,7 @@ public class CallChainAnalyzer {
     }
 
 
+
     /**
      * 初始化分析器，加载所有类和方法
      *
@@ -364,12 +368,8 @@ public class CallChainAnalyzer {
                 javaFiles.addAll(codeParser.scanJavaFiles(scanPath));
             }
 
-            // 获取所有文件的父目录路径（去重）
-            List<String> parentDirs = javaFiles.stream()
-                    .map(file -> file.getParentFile().getAbsolutePath())
-                    .distinct()
-                    .toList();
-            codeParser.init(parentDirs);
+
+            codeParser.init(codeBasePaths);
             for (File file : javaFiles) {
                 CompilationUnit cu = codeParser.parseFile(file);
                 //判断属于哪个pom,以及package，以及class
@@ -438,6 +438,7 @@ public class CallChainAnalyzer {
     }
 
     /**
+     * 核心方法
      * 递归调用，把所有的调用链都扒出来。
      * 约束：1. 必须在某个包的范围内
      * 约束：2. 如果已经找到mapper就返回
@@ -899,6 +900,7 @@ public class CallChainAnalyzer {
      * @return 实现类的全限定名
      */
     private String findImplementationClass(String interfaceName) {
+
         for (Map.Entry<String, ClassOrInterfaceDeclaration> entry : classMap.entrySet()) {
             ClassOrInterfaceDeclaration cls = entry.getValue();
             if(!cls.isInterface()){
